@@ -2,6 +2,7 @@ library(data.table)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
+library(cowplot)
 setwd("~/Documents/mieziai/calls/")
 
 # VCF fields:
@@ -51,216 +52,232 @@ gather(calls_sum, key="pool", value="MAC", twMAC:AIIMAC) %>%
   geom_line() +
   theme_bw()
 
-# zoom in 
-calls_sum = filter(calls2, POS>460e6) %>%
-  mutate(w=POS %/% 30e3) %>% 
-  group_by(w) %>%
-  summarize(twMAC=mean(twMAC), AIIMAC=mean(AIIMAC), n=n())
 
-gather(calls_sum, key="pool", value="MAC", twMAC:AIIMAC) %>%
-  ggplot(aes(x=w, y=MAC, col=pool)) + 
-  geom_line() +
-  theme_bw()
+# -----------------------------------
+# --------- CLEAN BIT ---------------
 
-filter(calls2, POS>350e6, twMAC==2, AIIMAC==0) %>%
-  ggplot(aes(x=POS, y=DP)) +
-  geom_point() +
-  theme_bw()
-filter(calls2, POS>465e6, twMAC==2, AIIMAC==0) %>%
-  ggplot(aes(x=POS/1e3, y=DP)) +
-  geom_point() +
-  theme_bw()
-
-filter(calls2, POS>468e6) %>%
-  mutate(w=POS %/% 10e3) %>%
-  group_by(w) %>%
-  summarize(twMAC=mean(twMAC), AIIMAC=mean(AIIMAC), n=n()) %>%
-  gather(key="pool", value="MAC", twMAC:AIIMAC) %>%
-  ggplot(aes(x=w, y=MAC, col=pool)) +
-  geom_point(size=0.8) +
-  theme_bw()
-
-
-## --------------
-# reading in single-sample depths
-callsA = fread("calls_AII_HVgp_nodups_chr1.txt")
-callsT = fread("calls_tw_HVgp_nodups_chr1.txt")
-
-cts = group_by(callsA, GT) %>%
-  summarize(n=n(), meanMapQ=mean(MQ), meanDP=mean(DP)) %>%
-  arrange(desc(n))
-View(cts)
-
-cts = group_by(callsT, GT) %>%
-  summarize(n=n(), meanMapQ=mean(MQ), meanDP=mean(DP)) %>%
-  arrange(desc(n))
-View(cts)
-
-# still don't like that DP4 is quite filtered out
-calls_out = tibble()
-for(chr in 1:7){
-  callsA = fread(paste0("calls_AII_HVgp_nodups_chr",chr,".txt"))
-  callsT = fread(paste0("calls_tw_HVgp_nodups_chr",chr,".txt"))
-  
-  callsA = separate(callsA, "DP4", c("refF", "refR", "altF", "altR"), sep=",")
-  callsT = separate(callsT, "DP4", c("refF", "refR", "altF", "altR"), sep=",")
-  callsA = mutate(callsA, ref=as.numeric(refF)+as.numeric(refR),
-                  alt=as.numeric(altF)+as.numeric(altR)) %>%
-    select(-one_of(c("refF", "refR", "altF", "altR")))
-  callsT = mutate(callsT, ref=as.numeric(refF)+as.numeric(refR),
-                  alt=as.numeric(altF)+as.numeric(altR)) %>%
-    select(-one_of(c("refF", "refR", "altF", "altR")))
-  
-  calls_sum = bind_rows("AII"=callsA, "tw"=callsT, .id="pool") %>%
-    mutate(w=POS %/% 1e6) %>%
-    group_by(w, pool) %>%
-    summarize(n=n(), MAF=mean(alt/(alt+ref)), chr=chr)
-  calls_out = bind_rows(calls_out, calls_sum)
-}
-
-ggplot(calls_out, aes(x=w, y=MAF)) +
-  geom_line(aes(col=pool)) +
-  facet_wrap(~chr, scales="free_x") +
-  theme_bw()
-
-## raw depths on a sample
-dp_wdup = read.table("../depth/dp_AII_HVgp.txt")
-dp_nodup = read.table("../depth/dp_AII_HVgp_nodups.txt")
-dp_m3 = read.table("../depth/dp_AII_M3.txt")
-dp_tw_wdup = read.table("../depth/dp_tw_HVgp.txt")
-dp_tw_nodup = read.table("../depth/dp_tw_HVgp_nodups.txt")
-dp_tw_m3 = read.table("../depth/dp_tw_M3.txt")
-
-dp = data.frame(POS=dp_wdup$V2, DP_WDUP=dp_wdup$V3, DP_NODUP=dp_nodup$V3,
-                DP_M3=dp_m3$V3, DP_TW_WDUP=dp_tw_wdup$V3,
-                DP_TW_NODUP=dp_tw_nodup$V3, DP_TW_M3=dp_tw_m3$V3)
-rm(dp_m3, dp_nodup, dp_tw_m3, dp_tw_nodup, dp_tw_wdup, dp_wdup)
-dp2 = gather(dp, key="stat", value="cnt", DP_WDUP:DP_TW_M3) %>%
-  mutate(ref=ifelse(stat %in% c("DP_M3", "DP_TW_M3"), "M3", "gp"),
-         dups=ifelse(stat %in% c("DP_NODUP", "DP_TW_NODUP"), "removed", "kept"),
-         pool=ifelse(stat %in% c("DP_TW_WDUP", "DP_TW_NODUP", "DP_TW_M3"), "tw", "AII"))
-dp2_sum = group_by(dp2, w=POS %/% 5e3, dups, pool, ref) %>%
-  summarize(DP=sum(cnt))
-
-# check duplicate removal:
-filter(dp2_sum, ref=="gp") %>%
-  ggplot(aes(x=w, y=DP+1, col=pool, lty=dups)) +
-  geom_line() + theme_bw() +
-  scale_y_log10()
-# dup removal doesn't seem to change much, even for the spikes.
-
-dp2 = filter(dp2, dups=="kept")
-dp2_sum = filter(dp2_sum, dups=="kept")
-dp2_sum %>%
-  ggplot(aes(x=w, y=DP+1, col=pool)) +
-  facet_grid(ref~.) +
-  geom_line() + theme_bw() +
-  scale_y_log10()
-
-# genes
-
-g_m3 = read.table("../refs/M3_chr2.gff3", sep="\t")
-g_gp = read.table("../refs/gp_chr2.gff3", sep="\t")
-g_m3 = filter(g_m3, V4<2e6)
-g_gp = filter(g_gp, V4<2e6)
-gs = bind_rows("gp"=g_gp, "M3"=g_m3, .id="ref")
-gs = mutate(gs, V4=V4 / 5e3, V5=V5 / 5e3) %>%
-  filter(V3=="gene")
-regexmatches = regexpr("description=[^;]*", gs$V9)
-gs$descr = ""
-gs$descr[regexmatches!=-1] = regmatches(gs$V9, regexmatches)
-# :(
-
-
-dp2_sum %>%
-  ggplot(aes(x=w, y=DP+1, col=pool)) +
-  facet_grid(ref~.) +
-  geom_line() + theme_bw() +
-  geom_segment(data=gs, aes(x=V4, xend=V5, y=1, yend=1, col=descr), size=5) +
-  scale_y_log10() + theme(legend.position="bottom")
-
-# ---------------------
-
-# calls / per-sample depths
-
-callsA = fread("calls_AII_HVgp_nodups_chr2.txt")
-callsA = filter(callsA, POS<=2e6)
-callsT = fread("calls_tw_HVgp_nodups_chr2.txt")
-callsT = filter(callsT, POS<=2e6)
-callsA = bind_rows("AII"=callsA, "tw"=callsT, .id="pool")
-
-callsA = separate(callsA, "DP4", c("refF", "refR", "altF", "altR"), sep=",")
-callsA = mutate(callsA, ref=as.numeric(refF)+as.numeric(refR),
-                alt=as.numeric(altF)+as.numeric(altR)) %>%
-  select(-one_of(c("refF", "refR", "altF", "altR")))
-
-callsA_sum = group_by(callsA, pool, w=POS %/% 5e3) %>%
-  summarize(ncalls=n(), ncalls_dp10=sum(DP>10 & MQ>30),
-            altAF=sum(alt)/(sum(ref)+sum(alt)),
-            meanMQ=mean(MQ))
-
-sum1 = filter(dp2_sum, ref=="gp") %>%
-  left_join(callsA_sum, by=c("w", "pool"))
-
-p1 = sum1 %>% 
-  ggplot(aes(x=w, y=DP+1, col=pool)) +
-  geom_line() + scale_y_log10() + theme_bw() +
-  theme(legend.position = "top")
-
-p2 = sum1 %>% filter(pool=="tw") %>%
-  gather(key="dp", value="ncalls", ncalls:ncalls_dp10) %>%
-  ggplot(aes(x=w, y=ncalls, lty=dp)) +
-  geom_line() + theme_bw() + 
-  geom_line(data=filter(sum1, pool=="AII"), aes(y=5*meanMQ), col="skyblue", lty="solid") +
-  theme(legend.position="bottom")
-
-p3 = sum1 %>%
-  ggplot(aes(x=w, y=altAF, col=pool)) +
-  geom_line() + theme_bw() +
-  theme(legend.position = "none")
-
-cowplot::plot_grid(p1, p3, p2, nrow=3)
-
+# TODO
 # informative plots:
 # DP in one, DP in other
 # ncalls in one, ncalls in other
 # maf in each??
 
+# Based on diagnostics.Rmd:
+# - use GoldenPromise ref
+# - duplicates can be removed
+# - can use joint calling, but need separate depths anyway
 
-# ------------- 
-callsA = fread("calls_AII_HVgp_nodups_chr2.txt")
-callsA = filter(callsA, POS<=350e6)
-callsM = fread("tmp_calls_M3_AII_chr2.txt")
-colnames(callsM) = colnames(callsA)
-callsM = filter(callsM, POS<=350e6)
-callsA = bind_rows("M3"=callsA, "gp"=callsM, .id="refgen")
+# load genetic map
+# from  IBSC (2016-07-12): High-resolution GBS map of the Morex x Barke RIL population. DOI:10.5447/ipk/2016/29
+map = read.table("../refs/barley_morex_x_barke_high_resolution_gbs_map.tsv", h=T)
+map = map[,2:4]
+map$chr = as.numeric(substr(map$chr, 4, 4))
 
-callsA = separate(callsA, "DP4", c("refF", "refR", "altF", "altR"), sep=",")
-callsA = mutate(callsA, ref=as.numeric(refF)+as.numeric(refR),
-                alt=as.numeric(altF)+as.numeric(altR)) %>%
-  select(-one_of(c("refF", "refR", "altF", "altR")))
+calls_out = tibble()
+calls_out_cm = tibble()
+for(chr in 1:7){
+  print(chr)
+  calls = bind_rows("AII"=fread(paste0("callsf_AII_HVgp_nodups_chr",chr,".txt")),
+                     "tw"=fread(paste0("callsf_tw_HVgp_nodups_chr",chr,".txt")),
+                    .id="pool")
+  # calls = bind_rows("AII"=fread(paste0("callsf_AII_M3_chr",chr,".txt")),
+  #                   "tw"=fread(paste0("callsf_tw_M3_chr",chr,".txt")),
+  #                   .id="pool")
+  
+  # Filtering for mapping quality:
+  calls = filter(calls, MQ>30)
+  
+  # Filtering by depth:
+  calls = filter(calls, DP>=15, DP<90)  # about 10 % loss
+  
+  calls = calls[,c("pool", "POS", "REF", "ALT", "DP", "MAF")]
+  
+  # Filtering only those present in both samples:
+  # calls = inner_join(filter(calls, pool=="AII"),
+  #                    filter(calls, pool=="tw"),
+  #                    by=c("POS", "REF", "ALT"),
+  #                    suffix=c(".AII", ".tw")) %>%
+  #   select(-one_of(c("pool.AII", "pool.tw")))
+  # # This is important! otherwise depth etc. can really differ
+  # # depending on which markers are included
+  # 
+  # # Filtering to remove roughly monomorphic markers:
+  # calls = filter(calls, MAF.AII<0.8 | MAF.tw<0.8)
+  # Keep only unique ones for either pool:
+  callsBOTH = inner_join(filter(calls, pool=="AII"), filter(calls, pool=="tw"),
+                         by=c("POS", "REF", "ALT"))
+  calls = anti_join(calls, callsBOTH, by=c("POS", "REF", "ALT"))
+  
+  calls = mutate(calls, w = POS %/% 2e6 * 2)  # in 2 Mbp windows
+  
+  # merge in the genetic coords
+  map_chr = map[map$chr==chr,]
+  # basic rescaling, to at least match the length of GP chroms:
+  # TODO
+  range_old = range(map_chr$pos)
+  range_new = range(calls$POS)
+  map_chr$pos = (map_chr$pos-range_old[1]) / diff(range_old) * diff(range_new) + range_new[1]
+  calls$cM = approx(map_chr$pos, map_chr$gbs_cM, calls$POS, rule=2)$y
+  calls = mutate(calls, w_cM = cM %/% 1 * 1)  # in 1 cM windows
+  
+  # calls = pivot_longer(calls, c(DP.AII, DP.tw, MAF.AII, MAF.tw),
+  #              names_to=c("stat", "pool"), names_sep="\\.", values_to="val") %>%
+  #   spread("stat", "val")
 
-callsA_sum = group_by(callsA, refgen, w=POS %/% 200e3) %>%
-  summarize(ncalls=n(), ncalls_dp10=sum(DP>10 & MQ>30),
-            ncalls_mono=sum(ref==0), ncalls_mono1=sum(ref<=1),
-            altAF=sum(alt)/(sum(ref)+sum(alt)),
-            meanMQ=mean(MQ))
+  calls_sum = calls %>%
+    group_by(w, pool) %>%
+    summarize(n=n(), mean11=mean(MAF>0.8), sum11=sum(MAF>0.8), medDP=median(DP), chr=chr)
+    # summarize(n=n(), meanMAF=mean(MAF), medDP=median(DP), chr=chr)
+  calls_sum_cm = calls %>%
+    group_by(w_cM, pool) %>%
+    summarize(n=n(), mean11=mean(MAF>0.8), sum11=sum(MAF>0.8), medDP=median(DP), chr=chr)
+    # summarize(n=n(), meanMAF=mean(MAF), medDP=median(DP), chr=chr)
 
-gather(callsA_sum, key="stat", value="y", c(ncalls,ncalls_dp10)) %>%
-  ggplot(aes(x=w, y=y+1, col=refgen, lty=stat)) +
-  geom_line() + scale_y_log10() +
-  theme_bw()
-callsA_sum %>%
-  ggplot(aes(x=w, y=meanMQ, col=refgen)) +
-  geom_line() + theme_bw()
-gather(callsA_sum, key="stat", value="y", c(ncalls_mono,ncalls_mono1)) %>%
-  ggplot(aes(x=w, y=y, col=refgen, lty=stat)) +
-  geom_line() + theme_bw()
-# it would seem that the GP reference is actually less similar to ours
-# (at least AII)? M3 has fewer calls & less weird regions.
-# Depth & MQ filters don't change anything for either.
+  calls_out = bind_rows(calls_out, calls_sum)
+  calls_out_cm = bind_rows(calls_out_cm, calls_sum_cm)
+}
 
-gather(callsA_sum, key="stat", value="y", ncalls:meanMQ) %>%
-  ggplot(aes(x=w, y=y, col=refgen)) +
-  geom_line() + 
-  facet_grid(stat~., scales="free_y") + theme_bw()
+# MAFs and median depth of called variants
+# over 2 Mbp physical windows
+ggplot(calls_out, aes(x=w, y=meanMAF)) +
+  geom_line(aes(col=pool)) +
+  facet_wrap(~chr, scales="free_x", nrow=2) +
+  theme_bw() + theme(legend.position="bottom")
+ggsave("~/Documents/mieziai/mafs_HVgp_nodup.png", width=15, height=6)
+
+calls_out %>%
+  ggplot(aes(x=w, y=medDP)) +
+  geom_line(aes(col=pool), alpha=0.7) +
+  facet_wrap(~chr, scales="free_x", nrow=2) +
+  theme_bw() + theme(legend.position="bottom")
+ggsave("~/Documents/mieziai/dps_HVgp_nodup.png", width=15, height=6)
+
+# Same over genetic map positions
+ggplot(calls_out_cm, aes(x=w_cM, y=meanMAF)) +
+  geom_line(aes(col=pool)) +
+  facet_wrap(~chr, scales="free_x", nrow=2) +
+  theme_bw() + theme(legend.position="bottom")
+ggplot(calls_out_cm, aes(x=w_cM, y=medDP)) +
+  geom_line(aes(col=pool), alpha=0.7) +
+  facet_wrap(~chr, scales="free_x", nrow=2) +
+  theme_bw() + theme(legend.position="bottom")
+
+ggplot(calls_out_cm, aes(x=w_cM, y=meanMAF, col=pool)) +
+  geom_line(alpha=0.3) +
+  geom_smooth(se=F) + 
+  facet_wrap(~chr, scales="free_x", nrow=2) +
+  theme_bw() + theme(legend.position="bottom")
+ggsave("~/Documents/mieziai/mafs_HVgp_nodup_cM.png", width=15, height=6)
+
+
+ggplot(calls_out, aes(x=w, y=mean11)) +
+  geom_line(aes(col=pool)) +
+  # scale_y_log10()+
+  facet_wrap(~chr, scales="free_x", nrow=2) +
+  theme_bw() + theme(legend.position="bottom")
+ggplot(calls_out, aes(x=w, y=sum11)) +
+  geom_line(aes(col=pool)) +
+  scale_y_log10()+
+  facet_wrap(~chr, scales="free_x", nrow=2) +
+  theme_bw() + theme(legend.position="bottom")
+
+ggplot(calls_out_cm, aes(x=w_cM, y=sum11+1, col=pool)) +
+  geom_line(alpha=0.7) +
+  scale_y_log10() +
+  facet_wrap(~chr, scales="free_x", nrow=2) +
+  theme_bw() + theme(legend.position="bottom")
+ggplot(calls_out_cm, aes(x=w_cM, y=mean11, col=pool)) +
+  geom_line(alpha=0.3) +
+  geom_smooth(se=F) + 
+  facet_wrap(~chr, scales="free_x", nrow=2) +
+  theme_bw() + theme(legend.position="bottom")
+ggsave("~/Documents/mieziai/mean11_HVgp_nodup_cM.png", width=15, height=6)
+
+
+ggplot(calls_out, aes(x=w, y=meanIndex)) +
+  geom_line(alpha=0.3) +
+  geom_smooth(se=F) + 
+  facet_wrap(~chr, scales="free_x", nrow=2) +
+  theme_bw() + theme(legend.position="bottom")
+ggplot(calls_out_cm, aes(x=w_cM, y=meanIndex)) +
+  geom_line(alpha=0.3) +
+  geom_smooth(se=F) + 
+  facet_wrap(~chr, scales="free_x", nrow=2) +
+  theme_bw() + theme(legend.position="bottom")
+
+
+# ------------------
+# chr 4 tests
+chr = 3
+calls = bind_rows("AII"=fread(paste0("callsf_AII_HVgp_nodups_chr",chr,".txt")),
+                  "tw"=fread(paste0("callsf_tw_HVgp_nodups_chr",chr,".txt")),
+                  .id="pool")
+calls = calls[,c("pool", "POS", "REF", "ALT", "DP", "MAF")]
+
+calls = mutate(calls, w = POS %/% 1e6)
+
+dp_calls = filter(calls, pool=="AII")
+dp_calls = mutate(dp_calls, kb=POS %/% 1e5 * 100) %>%
+  group_by(kb) %>%
+  summarize(DP=mean(DP), n=n(), meanMAF=mean(MAF))
+
+
+# raw depths
+dpA = read.table("../depth/dpkb_AII_HVgp_nodups_chr3.txt")
+colnames(dpA) = c("kb", "DP")
+dpA = mutate(dpA, kb = kb %/% 100 * 100) %>% # 0.1 Mbp windows
+  group_by(kb) %>%
+  summarize(DP=sum(DP))
+
+p1 = bind_rows("full"=mutate(dpA, DP=DP/1e5), "calls"=dp_calls, .id="source") %>%
+  ggplot(aes(x=kb, y=DP+1, col=source)) +
+  geom_line(alpha=0.6) + theme_bw() + xlab(NULL) +
+  scale_y_log10() + theme(legend.position="top", axis.ticks.x = element_blank(),
+                          axis.text.x = element_blank()) 
+p2 = ggplot(dp_calls, aes(x=kb, y=n)) +
+  geom_line(alpha=0.6, col="grey60") + theme_bw() +
+  ylab("n calls/kb") +xlab(NULL) +
+  scale_y_log10() + theme(axis.ticks.x = element_blank(),
+                          axis.text.x = element_blank())
+p3 = ggplot(dp_calls, aes(x=kb, y=meanMAF)) +
+  geom_line(alpha=0.6, col="purple") + theme_bw() +
+  ylab("mean altAF in calls")
+cowplot::plot_grid(p1, p2, p3, nrow=3, rel_heights = c(3,2,2))
+
+
+bind_rows("full"=mutate(dpA, DP=DP/1e5), "calls"=dp_calls, .id="source") %>%
+  group_by(source, Mb=kb %/% 1000) %>%
+  filter(Mb<573) %>%
+  summarize(DP=mean(DP)) %>%
+  ggplot(aes(x=Mb, y=DP+1, col=source)) +
+  geom_line(alpha=0.6) + theme_bw() +
+  scale_y_log10()
+
+calls4 = calls
+mutate(calls4, w=POS %/% 20e6) %>%
+  ggplot(aes(x=MAF, group=w, col=w)) + geom_density() +
+  theme_bw() + facet_grid(pool~., scales="free_y")
+
+# TODO this for all chrs
+mutate(calls, w=POS %/% 20e6) %>%
+  ggplot(aes(x=MAF, group=w, col=w)) + geom_density() +
+  coord_cartesian(ylim=c(0,10)) +
+  theme_bw() + facet_grid(pool~., scales="free_y")
+
+## look at the weird bits for chr4
+calls$chunk = cut(calls$POS, c(70e6, 83e6,  300e6, 320e6,  420e6, 440e6,  480e6, 500e6),
+                    labels=c("070h", NA,  "mid", NA,   "420m", NA,  "480l"))
+ggplot(calls, aes(x=MAF, col=chunk)) + geom_density() +
+  theme_bw() + facet_grid(pool~., scales="free_y")
+
+p1 = ggplot(dp_calls, aes(x=kb, y=meanMAF)) +
+  geom_line(alpha=0.6, col="purple") +
+  theme_bw() + ylab("mean altAF in calls")
+p2 = ggplot(dp_calls, aes(x=cM, y=meanMAF)) +
+  geom_line(alpha=0.6, col="purple") +
+  theme_bw() + ylab("mean altAF in calls")
+plot_grid(p1, p2, nrow=2)
+
+# ----------------------------
+
+
