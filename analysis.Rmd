@@ -1,0 +1,256 @@
+---
+title: "Analysis"
+author: "Julius J."
+date: "`r Sys.Date()`"
+geometry: "left=2cm,right=1cm,top=2cm,bottom=2cm"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = '~/Documents/mieziai/calls/')
+options(dplyr.summarise.inform = FALSE)
+
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(cowplot)
+```
+
+Based on diagnostics, we use GoldenPromise v1 reference genome, duplicates removed (which does not make much difference).
+
+The only genetic map I could find was on Morex x Barke, so we min-max rescale that to match GP chromosomes.
+
+```{r readin}
+# VCF fields:
+# ID=MQ0F,Type=Float,Description="Fraction of MQ0 reads (smaller is better)"
+# ID=MQ,Type=Integer,Description="Average mapping quality"
+# ID=DP,Number=1,Type=Integer,Description="Raw read depth"
+# ID=DP4,Number=4,Description="Number of high-quality ref-forward,
+#   ref-reverse, alt-forward and alt-reverse bases
+# MAF was calculated as DP4[3+4]/sum(DP4)
+
+# load genetic map
+# from  IBSC (2016-07-12): High-resolution GBS map of the Morex x Barke RIL population.
+#  DOI:10.5447/ipk/2016/29
+map = read.table("../refs/barley_morex_x_barke_high_resolution_gbs_map.tsv", h=T)
+map = map[,2:4]
+map$chr = as.numeric(substr(map$chr, 4, 4))
+
+# Another genetic map from MIPS FTP
+map2 = read.table("../refs/WGS_ANC.TXT", h=T)
+map2$strain = sapply(strsplit(map2$sequence_id, "_"), "[[", 1)
+map2 = filter(map2, strain=="morex")  # there are 3 identical strains there somehow
+
+# snpEff annotations for the tw SNPs
+ann = fread("../annots/annot_tw_mono.txt")
+# already filtered by GT, MQ, DP
+# filter strictly by MAF:
+ann = filter(ann, MAF>0.9)
+
+ann = mutate(ann, conseq = ifelse(grepl("HIGH", ANN), "high",
+                           ifelse(grepl("MODERATE", ANN), "mod", "low"))) %>%
+  mutate(conseq = factor(conseq, levels=c("high", "mod", "low")))
+
+calls_out = tibble()
+calls_out_cm = tibble()
+calls_out_cm2 = tibble()
+ann_out = tibble()
+ann_out_cm = tibble()
+for(chr in 1:7){
+  callsA = bind_rows("AII"=fread(paste0("callsf_AII_HVgp_nodups_chr",chr,".txt")),
+                     "tw"=fread(paste0("callsf_tw_HVgp_nodups_chr",chr,".txt")),
+                    .id="pool")
+  callsE = bind_rows("AII"=fread(paste0("exons_AII_HVgp_nodups_chr",chr,".txt")),
+                    "tw"=fread(paste0("exons_tw_HVgp_nodups_chr",chr,".txt")),
+                    .id="pool")
+  calls = bind_rows("all"=callsA, "exon"=callsE, .id="type")
+  
+  # Filtering for mapping quality:
+  calls = filter(calls, MQ>30)
+  
+  # Filtering by depth:
+  calls = filter(calls, DP>=15, DP<90)  # about 10 % loss
+  
+  calls = calls[,c("pool", "type", "POS", "REF", "ALT", "DP", "MAF")]
+  
+  # Filtering only those present in both samples:
+  callsBOTH = inner_join(filter(calls, pool=="AII"),
+                     filter(calls, pool=="tw"),
+                     by=c("POS", "REF", "ALT"),
+                     suffix=c(".AII", ".tw")) %>%
+    select(-one_of(c("pool.AII", "pool.tw")))
+  
+  # Keep only unique ones for either pool:
+  callsUNIQ = anti_join(calls, callsBOTH, by=c("POS", "REF", "ALT"))
+
+  # Filtering to remove roughly monomorphic markers:
+  callsBOTH = filter(callsBOTH, MAF.AII<0.8 | MAF.tw<0.8)
+
+  callsBOTH = pivot_longer(callsBOTH, c(DP.AII, DP.tw, MAF.AII, MAF.tw),
+               names_to=c("stat", "pool"), names_sep="\\.", values_to="val") %>%
+    spread("stat", "val")
+
+  callsBOTH$type="shared"
+  callsUNIQ$type="unique"
+  calls = bind_rows(calls, callsBOTH, callsUNIQ)
+
+  calls = mutate(calls, w = POS %/% 2e6 * 2)  # in 2 Mbp windows
+  
+  # merge in the genetic coords
+  map_chr = map[map$chr==chr,]
+  # basic rescaling, to at least match the length of GP chroms:
+  range_old = range(map_chr$pos)
+  range_new = range(calls$POS)
+  map_chr$pos = (map_chr$pos-range_old[1]) / diff(range_old) * diff(range_new) + range_new[1]
+  calls$cM = approx(map_chr$pos, map_chr$gbs_cM, calls$POS, rule=2)$y
+  calls = mutate(calls, w_cM = cM %/% 1 * 1)  # in 1 cM windows
+  
+  # merge in the genetic coords, different map
+  map2_chr = map2[map2$chr==chr,]
+  range_old = range(map2_chr$Mb)
+  map2_chr$pos = (map2_chr$Mb-range_old[1]) / diff(range_old) * diff(range_new) + range_new[1]
+  calls$cM2 = approx(map2_chr$pos, map2_chr$cM, calls$POS, rule=2, ties=mean)$y
+  calls = mutate(calls, w_cM2 = cM2 %/% 1 * 1)  # in 1 cM windows
+
+  calls_sum = calls %>%
+    group_by(w, pool, type) %>%
+    summarize(n=n(), mean11=mean(MAF>0.9), sum11=sum(MAF>0.9), medDP=median(DP),
+              chr=chr, meanMAF=mean(MAF))
+  calls_sum_cm = calls %>%
+    group_by(w_cM, pool, type) %>%
+    summarize(n=n(), mean11=mean(MAF>0.9), sum11=sum(MAF>0.9), medDP=median(DP),
+              chr=chr, meanMAF=mean(MAF))
+  calls_sum_cm2 = calls %>%
+    group_by(w_cM2, pool, type) %>%
+    summarize(n=n(), mean11=mean(MAF>0.9), sum11=sum(MAF>0.9), medDP=median(DP),
+              chr=chr, meanMAF=mean(MAF))
+  
+  # same for the tw snps w/ annotations
+  ann_chr = ann[ann$CHR==chr,]
+  calls_contr = filter(callsA, pool=="AII")
+  ann_chr = bind_rows("shared"=semi_join(ann_chr, calls_contr, by=c("POS", "REF", "ALT")),
+                      "unique"=anti_join(ann_chr, calls_contr, by=c("POS", "REF", "ALT")),
+                      .id="shared")
+  ann_chr$cM = approx(map_chr$pos, map_chr$gbs_cM, ann_chr$POS, rule=2)$y
+  ann_chr = mutate(ann_chr, w = POS %/% 2e6*2, w_cM = cM %/% 1 * 1)  # in 2 Mbp / 1 cM windows
+  ann_sum = ann_chr %>%
+    group_by(w, conseq, shared) %>%
+    summarize(n=n(), chr=chr)
+  ann_sum_cm = ann_chr %>%
+    group_by(w_cM, conseq, shared) %>%
+    summarize(n=n(), chr=chr)
+  
+
+  calls_out = bind_rows(calls_out, calls_sum)
+  calls_out_cm = bind_rows(calls_out_cm, calls_sum_cm)
+  calls_out_cm2 = bind_rows(calls_out_cm2, calls_sum_cm2)
+  ann_out = bind_rows(ann_out, ann_sum)
+  ann_out_cm = bind_rows(ann_out_cm, ann_sum_cm)
+}
+```
+
+# Coverage on physical map
+
+```{r plotphys, echo=F, fig.width=9.5, fig.height=6.5}
+# remember that depth changes basically only b/c of selection
+# on called positions, and is quite flat overall
+calls_out %>%
+  ggplot(aes(x=w, y=medDP)) +
+  geom_line(aes(col=pool), alpha=0.7) +
+  facet_grid(type~chr, scales="free_x") +
+  xlab("Mbp") + ylab("median depth") +
+  theme_bw() + theme(legend.position="bottom")
+ggplot(calls_out, aes(x=w, y=n)) +
+  geom_line(aes(col=pool)) +
+  facet_grid(type~chr, scales="free") +
+  xlab("Mbp") + ylab("n calls") +
+  theme_bw() + theme(legend.position="bottom")
+ggplot(calls_out, aes(x=w, y=meanMAF)) +
+  geom_line(aes(col=pool)) +
+  facet_grid(type~chr, scales="free_x") +
+  xlab("Mbp") + ylab("mean alt. AF") +
+  theme_bw() + theme(legend.position="bottom")
+```
+
+# Coverage on genetic map
+
+```{r plotgen, echo=F, fig.width=9.5, fig.height=6.5}
+ggplot(calls_out_cm, aes(x=w_cM, y=n)) +
+  geom_line(aes(col=pool)) +
+  facet_grid(type~chr, scales="free") +
+  xlab("cM") + ylab("n calls") +
+  theme_bw() + theme(legend.position="bottom")
+
+ggplot(calls_out_cm, aes(x=w_cM, y=meanMAF, col=pool)) +
+  geom_line(alpha=0.4) +
+  facet_grid(type~chr, scales="free_x") +
+  geom_smooth(se=F, method="loess", formula="y~x") + 
+  xlab("cM") + ylab("mean alt. AF") +
+  theme_bw() + theme(legend.position="bottom")
+
+# Frac AF>0.9, instead of mean AAF, cleans up the noise quite well
+# as many positions have moderate AFs:
+ggplot(calls_out_cm, aes(x=w_cM, y=mean11, col=pool)) +
+  geom_line(alpha=0.4) +
+  facet_grid(type~chr, scales="free_x") +
+  geom_smooth(se=F, method="loess", formula="y~x") + 
+  xlab("cM") + ylab("frac. alt. AF>0.9") +
+  theme_bw() + theme(legend.position="bottom")
+```
+
+# Coverage on a different genetic map
+
+```{r plotgen2, echo=F, fig.width=9.5, fig.height=6.5}
+ggplot(calls_out_cm2, aes(x=w_cM2, y=n)) +
+  geom_line(aes(col=pool)) +
+  facet_grid(type~chr, scales="free") +
+  xlab("cM") + ylab("n calls") +
+  theme_bw() + theme(legend.position="bottom")
+
+ggplot(calls_out_cm2, aes(x=w_cM2, y=meanMAF, col=pool)) +
+  geom_line(alpha=0.4) +
+  facet_grid(type~chr, scales="free_x") +
+  geom_smooth(se=F, method="loess", formula="y~x") + 
+  xlab("cM") + ylab("mean alt. AF") +
+  theme_bw() + theme(legend.position="bottom")
+
+# Frac AF>0.9, instead of mean AAF, cleans up the noise quite well
+# as many positions have moderate AFs:
+ggplot(calls_out_cm2, aes(x=w_cM2, y=mean11, col=pool)) +
+  geom_line(alpha=0.4) +
+  facet_grid(type~chr, scales="free_x") +
+  geom_smooth(se=F, method="loess", formula="y~x") + 
+  xlab("cM") + ylab("frac. alt. AF>0.9") +
+  theme_bw() + theme(legend.position="bottom")
+```
+
+
+# SNPs by annotated impact
+
+```{r plotsnpeff, echo=F, fig.width=9.5, fig.height=6.5}
+filter(ann_out, conseq=="low") %>%
+  ggplot(aes(x=w, fill=conseq, y=n+1)) +
+  geom_area(alpha=0.7) +
+  geom_point(data=filter(ann_out, conseq!="low"), aes(col=conseq)) +
+  facet_grid(shared~chr, scales="free_x") +
+  scale_y_log10() +
+  scale_fill_brewer(palette="OrRd", name="conseq", drop=F, direction=-1) + 
+  scale_color_brewer(palette="OrRd", name="conseq", drop=F, direction=-1) + 
+  xlab("Mbp") + ylab("number of calls") +
+  theme_bw() + theme(legend.position="bottom")
+
+filter(ann_out_cm, conseq=="low") %>%
+  ggplot(aes(x=w_cM, fill=conseq, y=n+1)) +
+  geom_area(alpha=0.7) +
+  geom_point(data=filter(ann_out_cm, conseq!="low"), aes(col=conseq)) +
+  facet_grid(shared~chr, scales="free_x") +
+  scale_y_log10() +
+  scale_fill_brewer(palette="OrRd", name="conseq", drop=F, direction=-1) + 
+  scale_color_brewer(palette="OrRd", name="conseq", drop=F, direction=-1) + 
+  xlab("cM") + ylab("number of calls") +
+  theme_bw() + theme(legend.position="bottom")
+```

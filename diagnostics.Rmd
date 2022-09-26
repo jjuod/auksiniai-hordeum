@@ -1,0 +1,218 @@
+---
+title: "Diagnostics"
+author: "Julius J."
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T)
+knitr::opts_knit$set(root.dir = '~/Documents/mieziai/calls/')
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+# Choosing reference genome
+
+```{r refgenome}
+callsA_sum = tibble()
+chrbounds = c()
+for(chr in 2:4){
+  callsGP = fread(paste0("calls_AII_HVgp_nodups_chr",chr,".txt"))
+  callsM = fread(paste0("calls_AII_M3_chr",chr,".txt"))
+  callsA = bind_rows("M3"=callsM, "gp"=callsGP, .id="refgen")
+  
+  callsA = separate(callsA, "DP4", c("refF", "refR", "altF", "altR"), sep=",")
+  callsA = mutate(callsA, ref=as.numeric(refF)+as.numeric(refR),
+                  alt=as.numeric(altF)+as.numeric(altR)) %>%
+    select(-one_of(c("refF", "refR", "altF", "altR")))
+  
+  # Summarize over windows
+  tmp_sum = group_by(callsA, refgen, w=(POS %/% 200e3)*0.2) %>% # w = pos in mbp
+    summarize(ncalls=n(), ncalls_dp10=sum(DP>10 & MQ>30),
+              ncalls_mono=sum(ref==0), ncalls_mono1=sum(ref<=1),
+              altAF=mean(alt/(ref+alt)),
+              altAF_poly=mean(ifelse(ref==0, NA, alt/(ref+alt)), na.rm=T),
+              meanMQ=mean(MQ))
+  tmp_sum$chr = chr
+  
+  lastchrbound = pmax(max(callsA_sum$w),0)
+  chrbounds = c(chrbounds, lastchrbound)
+  tmp_sum$w = tmp_sum$w + lastchrbound + 5  # plot all chroms on one x dimension
+  callsA_sum = bind_rows(callsA_sum, tmp_sum)
+}
+
+```
+
+## Mapping quality is lower & more variable in M3
+```{r plot1}
+callsA_sum %>%
+  ggplot(aes(x=w, y=meanMQ, col=refgen)) +
+  geom_vline(xintercept=chrbounds, col="grey70") +
+  geom_line(alpha=0.7) + theme_bw()
+
+# using the last chromosome:
+group_by(callsA, refgen) %>% summarize(mean(MQ), sd(MQ), mean(MQ<30))
+```
+
+## Number of variants is high & variable with M3, and not fixed by quality filters
+```{r plot2}
+# DP and MQ filters applied above
+gather(callsA_sum, key="stat", value="y", c(ncalls,ncalls_dp10)) %>%
+  ggplot(aes(x=w, y=(y+1)/0.2, col=refgen, lty=stat)) +
+  geom_vline(xintercept=chrbounds, col="grey70") +
+  geom_line(alpha=0.6) + scale_y_log10() +
+  scale_linetype_discrete(labels=c("all calls", "DP>10 & MQ>30"), name=NULL) +
+  scale_color_discrete(labels=c("Golden Promise", "Morex V3"), name="reference") +
+  xlab("Mbp") + ylab("calls per Mbp") +
+  theme_bw() + theme(legend.position="bottom")
+```
+
+## But a lot of monomorphic calls with M3 reference
+```{r plot3}
+# see above for definitions
+gather(callsA_sum, key="stat", value="y", c(ncalls_mono,ncalls_mono1)) %>%
+  ggplot(aes(x=w, y=y/0.2, col=refgen, lty=stat)) +
+  geom_vline(xintercept=chrbounds, col="grey70") +
+  scale_linetype_discrete(labels=c("monomorphic", "AC<=1"), name=NULL) +
+  scale_color_discrete(labels=c("Golden Promise", "Morex V3"), name="reference") +
+  xlab("Mbp") + ylab("calls per Mbp") +
+  geom_line(alpha=0.7) + theme_bw()
+```
+
+## Removing them makes the variants more similar between references, but still worse in M3
+```{r plot4}
+mutate(callsA_sum, ncalls_poly=ncalls-ncalls_mono) %>%
+  gather(key="stat", value="y", c(altAF, altAF_poly)) %>%
+  ggplot(aes(x=w, y=y, col=refgen)) +
+  geom_vline(xintercept=chrbounds, col="grey70") +
+  geom_line(alpha=0.7) +
+  xlab("Mbp") + ylab("mean alternate allele frequency") +
+  scale_color_discrete(labels=c("Golden Promise", "Morex V3"), name="reference") +
+  ylim(c(0,1)) + 
+  facet_grid(stat~., scales="free_y") + theme_bw()
+
+mutate(callsA_sum, ncalls_poly=ncalls-ncalls_mono) %>%
+  gather(key="stat", value="y", c(ncalls, ncalls_poly)) %>%
+  ggplot(aes(x=w, y=y/0.2, col=refgen)) +
+  geom_vline(xintercept=chrbounds, col="grey70") +
+  geom_line(alpha=0.7) +
+  xlab("Mbp") + ylab("calls per Mbp") +
+  scale_color_discrete(labels=c("Golden Promise", "Morex V3"), name="reference") +
+  facet_grid(stat~., scales="free_y") + theme_bw()
+
+# using the last chromosome:
+filter(callsA, ref>0) %>% group_by(refgen) %>% summarize(mean(MQ), sd(MQ), mean(MQ<30))
+```
+
+# Duplicates: keep or remove?
+
+## A sample of mapped depths for every position
+```{r readdps}
+# Depths at every position for first 2Mbp of chr2:
+dp_wdup = read.table("../depth/dp_AII_HVgp.txt")
+dp_nodup = read.table("../depth/dp_AII_HVgp_nodups.txt")
+dp_m3 = read.table("../depth/dp_AII_M3.txt")
+dp_tw_wdup = read.table("../depth/dp_tw_HVgp.txt")
+dp_tw_nodup = read.table("../depth/dp_tw_HVgp_nodups.txt")
+dp_tw_m3 = read.table("../depth/dp_tw_M3.txt")
+
+dp = data.frame(POS=dp_wdup$V2, DP_WDUP=dp_wdup$V3, DP_NODUP=dp_nodup$V3,
+                DP_M3=dp_m3$V3, DP_TW_WDUP=dp_tw_wdup$V3,
+                DP_TW_NODUP=dp_tw_nodup$V3, DP_TW_M3=dp_tw_m3$V3)
+rm(dp_m3, dp_nodup, dp_tw_m3, dp_tw_nodup, dp_tw_wdup, dp_wdup)
+dp2 = gather(dp, key="stat", value="cnt", DP_WDUP:DP_TW_M3) %>%
+  mutate(ref=ifelse(stat %in% c("DP_M3", "DP_TW_M3"), "M3", "gp"),
+         dups=ifelse(stat %in% c("DP_NODUP", "DP_TW_NODUP"), "removed", "kept"),
+         pool=ifelse(stat %in% c("DP_TW_WDUP", "DP_TW_NODUP", "DP_TW_M3"), "tw", "AII"))
+dp2_sum = group_by(dp2, w=(POS %/% 5e3)*5, dups, pool, ref) %>% # w in kbp
+  summarize(DP=sum(cnt))
+```
+
+## Duplicate removal does not change much, for either pool and even at spikes
+```{r}
+filter(dp2_sum, ref=="gp") %>%
+  ggplot(aes(x=w, y=DP, col=pool, lty=dups)) +
+  xlab("kbp along chr 2") + ylab("depth") +
+  geom_line() + theme_bw()
+filter(dp2_sum, ref=="gp") %>%
+  ggplot(aes(x=w, y=DP+1, col=pool, lty=dups)) +
+  geom_line() + theme_bw() +
+  xlab("kbp along chr 2") + ylab("depth + 1") +
+  scale_y_log10()
+```
+
+## Depth, and mapped genes, also show substantial alignment differences in references
+
+```{r genes}
+# annotations downloaded from http://ftp.ensemblgenomes.org/pub/plants/release-54/gff3/
+g_m3 = read.table("../refs/M3_chr2.gff3", sep="\t")
+g_gp = read.table("../refs/gp_chr2.gff3", sep="\t")
+g_m3 = filter(g_m3, V4<2e6)
+g_gp = filter(g_gp, V4<2e6)
+gs = bind_rows("gp"=g_gp, "M3"=g_m3, .id="ref")
+gs = mutate(gs, V4=V4 / 1e3, V5=V5 / 1e3) %>%
+  filter(V3=="gene")
+regexmatches = regexpr("description=[^;]*", gs$V9)
+gs$descr = ""
+gs$descr[regexmatches!=-1] = regmatches(gs$V9, regexmatches)
+
+dp2_sum %>%
+  filter(dups=="kept") %>%
+  ggplot(aes(x=w, y=DP+1, col=pool)) +
+  facet_grid(ref~.) +
+  geom_line() + theme_bw() +
+  xlab("kbp along chr 2") + ylab("depth + 1") +
+  geom_segment(data=gs, aes(x=V4, xend=V5, y=1, yend=1, col=descr), size=5) +
+  scale_y_log10() + theme(legend.position="bottom")
+
+```
+
+# Calling pools separately vs. jointly
+
+## About 1 % difference in numbers, slightly more called jointly, but separate method provides per-sample depths
+```{r readsepjointcalls}
+# Here using GP reference, duplicates removed, based on above
+f12 = fread("calls_HVgp_nodups_chr2.txt")
+f1 = fread("calls_AII_HVgp_nodups_chr2.txt")
+f2 = fread("calls_tw_HVgp_nodups_chr2.txt")
+
+nrow(f1)+nrow(f2); nrow(f12)
+table(unique(c(f1$POS, f2$POS)) %in% f12$POS)
+table(unique(f12$POS) %in% c(f1$POS, f2$POS))
+# hmm slight differences, ~ 0.5-1%.
+# slightly more called jointly I guess.
+
+# ignoring some rare cases when alleles don't match:
+# find all differences in calling separately vs jointly
+join1 = full_join(f12, f1, by=c("POS", "REF", "ALT"), suffix=c(".at", ".a")) %>%
+  full_join(f2, by=c("POS", "REF", "ALT"), suffix=c("", ".t")) %>%
+  filter(is.na(GT) | is.na(GT.t) | is.na(AII))
+nrow(join1)
+
+# of those not called in the joint pipeline, most were only called for
+# one of the samples when separated
+filter(join1, is.na(AII)) %>%
+  group_by(GT, GT.t) %>%
+  summarize(n())
+
+# remove those that are ref-mono in one of the samples and hence should differ
+join1 = filter(join1, !(AII=="0/0" & is.na(GT)))
+nrow(join1)
+join1 = filter(join1, !(tw=="0/0" & is.na(GT.t))) # most were this: i.e. polymorphic in AII only
+nrow(join1)
+
+table(is.na(join1$GT), is.na(join1$GT.t))
+# ~1 % for some reason were not called in neither of the two individual files
+
+join1 = filter(join1, !is.na(AII))
+nrow(join1)
+
+table(is.na(join1$GT), is.na(join1$GT.t))
+filter(join1, is.na(GT)) %>% group_by(AII) %>% summarize(n())
+filter(join1, is.na(GT.t)) %>% group_by(tw) %>% summarize(n())
+# a substantial number (~ 6 % for each pool) were not called separately,
+# but called for the same sample jointly, although mostly as 0/1 or ./.  :/
+```
