@@ -79,9 +79,9 @@ set -e
 #plot-bamstats map_stats_tw_HVgp.txt -p plots/p_tw
 
 #bwa mem -t 9 /mnt/quick/julius-temp/Hordeum_vulgare.MorexV3.dna_sm.fa \
-#	../trim/AII_frw.fq.gz ../trim/AII_rev.fq.gz 2> bwa_log.txt | samtools fixmate -@2 - AII_M3.bam
+#	../trim/AII_frw.fq.gz ../trim/AII_rev.fq.gz 2> bwa_log.txt | samtools fixmate -m -@2 - AII_M3.bam
 #bwa mem -t 9 /mnt/quick/julius-temp/Hordeum_vulgare.MorexV3.dna_sm.fa \
-#	../trim/tw_frw.fq.gz ../trim/tw_rev.fq.gz 2> bwa_log_tw.txt | samtools fixmate -@2 - tw_M3.bam
+#	../trim/tw_frw.fq.gz ../trim/tw_rev.fq.gz 2> bwa_log_tw.txt | samtools fixmate -m -@2 - tw_M3.bam
 #samtools stats -in AII_M3.bam > map-stats-AII-M3.txt
 #samtools stats -in tw_M3.bam > map-stats-tw-M3.txt
 #plot-bamstats map-stats-AII-M3.txt -p plots/M3-AII
@@ -170,8 +170,8 @@ cd ~/Documents/mieziai/2022/called/
 #	-Oz -o called22_tw_mono.vcf.gz
 #java -jar /mnt/hdd/soft/snpEff/snpEff.jar Hordeum_vulgare_goldenpromise called22_tw_mono.vcf.gz | gzip > annot_tw_mono.vcf.gz
 # apply some filtering and reforamt
-bcftools query -f "%CHROM\t%POS\t%REF\t%ALT\t%DP\t%DP4\t%MQ0F\t%MQ\t%ANN\t[%GT]\n" annot_tw_mono.vcf.gz | awk -v FS="\t" 'BEGIN{print "CHR", "POS", "REF", "ALT", "DP", "DP4", "MAF", "MQ0F", "MQ", "ANN"} $5>10 && $8>20 && $10=="1\/1"{split($6, d, ","); ref=d[1]+d[2]; alt=d[3]+d[4];
-print substr($1, 7,7), $2, $3, $4, $5, ref+alt, alt/(ref+alt), $7, $8, $9}' > annot_tw_mono.txt
+#bcftools query -f "%CHROM\t%POS\t%REF\t%ALT\t%DP\t%DP4\t%MQ0F\t%MQ\t%ANN\t[%GT]\n" annot_tw_mono.vcf.gz | awk -v FS="\t" 'BEGIN{print "CHR", "POS", "REF", "ALT", "DP", "DP4", "MAF", "MQ0F", "MQ", "ANN"} $5>10 && $8>20 && $10=="1\/1"{split($6, d, ","); ref=d[1]+d[2]; alt=d[3]+d[4];
+#print substr($1, 7,7), $2, $3, $4, $5, ref+alt, alt/(ref+alt), $7, $8, $9}' > annot_tw_mono.txt
 
 
 
