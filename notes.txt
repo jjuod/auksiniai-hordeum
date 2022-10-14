@@ -1,0 +1,42 @@
+unzipping 11ES: 418 933 680 lines
+= 104 732 000 reads
+x 150 bp
+= 15 600 000 000 bp
+= 3 x coverage?
+x 2 files = 6x coverage?
+
+11PS: 937 781 332 lines
+= 234 400 000 reads
+x 150 bp
+= 35 100 000 000 bp
+= 7 x coverage?
+x 2 files = 15 x coverage?
+
+viso: ~20x coverage
+
+### TOOLS
+assembly: SPAdes, Velvet
+QC: sickle?, FastQC, cutadapt
+alignment: BWA-mem or bowtie2 look same
+
+### QC
+FastQC shows standard adapters in about 3 % reads
+cutadapt finds 6.6%
+galai sueina su pateiktais indeksais, pvz:
+ @A00551:33:HF7VKDSXX:1:1101:4336:1078 1:N:0:ATTACTCG+NATAGCCT
+ CAGAGAGGTGGCGGAGGTAGCAACTCTGTTGAGTGAAATCCATTCGACTGGTAAACACGAATTCCCAAAAAGAAGAGTCCAATCGGATACTGAAGGAAGATGGAAGagatcggaagagcacacgtctgaactccagtca cattactcgat
+(kai adapteris yra AGATCGGAAGAGCACACGTCTGAACTCCAGTCA)
+net ir visai nukirptos dalys (nuo bp 0) yra logiskos, nes
+ @A00551:33:HF7VKDSXX:1:1101:6867:9627 1:N:0:ATTACTCG+TATAGCCT
+ gatcggaagagcacacgtctgaactccagtcacattactcgatcgcgtatgccgtcgtcggcttgaaaaggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg
+
+and trimming to min length of 30 (very few insert sizes betw 1-30).
+
+still a bit weird GC content, and A enrichment in base 2.
+
+
+adapter trimming via cutadapt
+cutadapt -a ADAPTER -o out.fastq in.fastq
+- sufficient to deal w/ Illumina adapts
+
+- for paired end files need paired options
