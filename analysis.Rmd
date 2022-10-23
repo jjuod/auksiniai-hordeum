@@ -78,14 +78,15 @@ for(chr in 1:7){
   calls = calls[,c("pool", "type", "POS", "REF", "ALT", "DP", "MAF")]
   
   # Filtering only those present in both samples:
-  callsBOTH = inner_join(filter(calls, pool=="AII"),
-                     filter(calls, pool=="tw"),
+  callsBOTH = inner_join(filter(calls, pool=="AII", type=="all"),
+                     filter(calls, pool=="tw", type=="all"),
                      by=c("POS", "REF", "ALT"),
                      suffix=c(".AII", ".tw")) %>%
     select(-one_of(c("pool.AII", "pool.tw")))
-  
+
   # Keep only unique ones for either pool:
-  callsUNIQ = anti_join(calls, callsBOTH, by=c("POS", "REF", "ALT"))
+  callsUNIQ = anti_join(filter(calls, type=="all"),
+                        callsBOTH, by=c("POS", "REF", "ALT"))
 
   # Filtering to remove roughly monomorphic markers:
   callsBOTH = filter(callsBOTH, MAF.AII<0.8 | MAF.tw<0.8)
@@ -254,3 +255,314 @@ filter(ann_out_cm, conseq=="low") %>%
   xlab("cM") + ylab("number of calls") +
   theme_bw() + theme(legend.position="bottom")
 ```
+
+# Comparing w/ individual runs shows correlated MAFs and DPs for the called variants
+
+```{r indivcomp, fig.width=4, fig.height=4}
+chr=1
+cold = bind_rows("AII"=fread(paste0("../old/newcalls/callsf_AII-11_HVgp_chr",chr,".txt")),
+                 "tw"=fread(paste0("../old/newcalls/callsf_tw-12_HVgp_chr",chr,".txt")),
+                 .id="pool")
+calls = bind_rows("AII"=fread(paste0("callsf_AII_HVgp_nodups_chr",chr,".txt")),
+                 "tw"=fread(paste0("callsf_tw_HVgp_nodups_chr",chr,".txt")),
+                 .id="pool")
+
+tmp = inner_join(cold, calls, by=c("pool", "POS", "REF", "ALT"))
+tmp = filter(tmp, POS<100e6, POS %% 10==0)
+ggplot(tmp, aes(x=MAF.x, y=MAF.y, col=pool)) +
+  geom_point(size=0.7) + theme_bw() +
+  xlab("MAF indiv") + ylab("MAF pool")
+
+filter(tmp, pool=="tw") %>%
+  ggplot(aes(x=MAF.x, y=MAF.y)) +
+  geom_point(size=0.7) + theme_bw() +
+  xlab("MAF indiv. (tw)") + ylab("MAF pool (tw)")
+
+filter(tmp, pool=="tw", DP.x<120, DP.y<150) %>%
+  ggplot(aes(x=DP.x, y=DP.y)) +
+  stat_smooth(method="lm", col="grey70") +
+  geom_vline(xintercept=median(tmp$DP.x), col="grey50") +
+  geom_hline(yintercept=median(tmp$DP.y), col="grey50") +
+  geom_point(size=0.7) + theme_bw() +
+  xlab("DP indiv. (tw)") + ylab("DP pool (tw)")
+
+```
+
+## However, correlation is much weaker after limiting to smaller DP
+```{r mafcorr2}
+
+tmp = inner_join(cold, calls, by=c("pool", "POS", "REF", "ALT")) %>%
+  filter(POS<150e6, pool=="tw")
+tmp2 = filter(tmp, DP.x<15, DP.x>5)
+tmp2s = sample_n(tmp, nrow(tmp2))
+bind_rows("5<DP<15"=tmp2, "random"=tmp2s, .id="variants") %>%
+  ggplot(aes(x=MAF.x, y=MAF.y)) +
+  facet_wrap(~variants) + 
+  geom_point(size=0.7) + theme_bw() +
+  xlab("MAF indiv. (tw)") + ylab("MAF pool (tw)")
+
+```
+
+# Replotting the mean MAF for small-DP variants
+
+```{r readin2}
+calls_out = tibble()
+calls_out_cm = tibble()
+for(chr in 1:7){
+  calls = bind_rows("AII"=fread(paste0("callsf_AII_HVgp_nodups_chr",chr,".txt")),
+                     "tw"=fread(paste0("callsf_tw_HVgp_nodups_chr",chr,".txt")),
+                    .id="pool")
+  contr_old = fread(paste0("../old/newcalls/callsf_tw-12_HVgp_chr",chr,".txt")) %>%
+    filter(DP>10, DP<16)
+  calls = semi_join(calls, contr_old, by=c("POS", "REF", "ALT"))
+  
+  # Filtering for mapping quality:
+  calls = filter(calls, MQ>30)
+  
+  # Filtering by depth:
+  calls = filter(calls, DP>=15, DP<90)  # about 10 % loss
+  
+  calls$type = "all"
+  calls = calls[,c("pool", "type", "POS", "REF", "ALT", "DP", "MAF")]
+  
+  # Filtering only those present in both samples:
+  callsBOTH = inner_join(filter(calls, pool=="AII", type=="all"),
+                     filter(calls, pool=="tw", type=="all"),
+                     by=c("POS", "REF", "ALT"),
+                     suffix=c(".AII", ".tw")) %>%
+    select(-one_of(c("pool.AII", "pool.tw")))
+
+  # Keep only unique ones for either pool:
+  callsUNIQ = anti_join(calls, callsBOTH, by=c("POS", "REF", "ALT"))
+
+  # Filtering to remove roughly monomorphic markers:
+  callsBOTH = filter(callsBOTH, MAF.AII<0.8 | MAF.tw<0.8)
+
+  callsBOTH = pivot_longer(callsBOTH, c(DP.AII, DP.tw, MAF.AII, MAF.tw),
+               names_to=c("stat", "pool"), names_sep="\\.", values_to="val") %>%
+    spread("stat", "val")
+
+  callsBOTH$type="shared"
+  callsUNIQ$type="unique"
+  calls = bind_rows(calls, callsBOTH, callsUNIQ)
+
+  calls = mutate(calls, w = POS %/% 2e6 * 2)  # in 2 Mbp windows
+  
+  # merge in the genetic coords
+  map_chr = map[map$chr==chr,]
+  # basic rescaling, to at least match the length of GP chroms:
+  range_old = range(map_chr$pos)
+  range_new = range(calls$POS)
+  map_chr$pos = (map_chr$pos-range_old[1]) / diff(range_old) * diff(range_new) + range_new[1]
+  calls$cM = approx(map_chr$pos, map_chr$gbs_cM, calls$POS, rule=2)$y
+  calls = mutate(calls, w_cM = cM %/% 1 * 1)  # in 1 cM windows
+  
+  calls_sum = calls %>%
+    group_by(w, pool, type) %>%
+    summarize(n=n(), mean11=mean(MAF>0.9), sum11=sum(MAF>0.9), medDP=median(DP),
+              chr=chr, meanMAF=mean(MAF))
+  calls_sum_cm = calls %>%
+    group_by(w_cM, pool, type) %>%
+    summarize(n=n(), mean11=mean(MAF>0.9), sum11=sum(MAF>0.9), medDP=median(DP),
+              chr=chr, meanMAF=mean(MAF))
+  
+  calls_out = bind_rows(calls_out, calls_sum)
+  calls_out_cm = bind_rows(calls_out_cm, calls_sum_cm)
+}
+```
+
+```{r plotafterdplim, echo=F, fig.width=9.5, fig.height=5}
+ggplot(calls_out, aes(x=w, y=n)) +
+  geom_line(aes(col=pool)) +
+  facet_grid(type~chr, scales="free") +
+  xlab("Mbp") + ylab("n calls") +
+  theme_bw() + theme(legend.position="bottom")
+ggplot(calls_out, aes(x=w, y=meanMAF)) +
+  geom_line(aes(col=pool)) +
+  facet_grid(type~chr, scales="free_x") +
+  xlab("Mbp") + ylab("mean alt. AF") +
+  theme_bw() + theme(legend.position="bottom")
+
+ggplot(calls_out_cm, aes(x=w_cM, y=meanMAF, col=pool)) +
+  geom_line(alpha=0.4) +
+  facet_grid(type~chr, scales="free_x") +
+  geom_smooth(se=F, method="loess", formula="y~x") + 
+  xlab("cM") + ylab("mean alt. AF") +
+  theme_bw() + theme(legend.position="bottom")
+ggplot(calls_out_cm, aes(x=w_cM, y=mean11, col=pool)) +
+  geom_line(alpha=0.4) +
+  facet_grid(type~chr, scales="free_x") +
+  geom_smooth(se=F, method="loess", formula="y~x") + 
+  xlab("cM") + ylab("frac. alt. AF>0.9") +
+  theme_bw() + theme(legend.position="bottom")
+```
+
+
+# Recalling on a consensus reference built from previous runs
+
+```{r readin3}
+cons_out = tibble()
+cons_out_cm = tibble()
+for(chr in 1:7){
+  calls = bind_rows("AII"=fread(paste0("callsconsf_AII_HVgp_chr",chr,".txt")),
+                     "tw"=fread(paste0("callsconsf_tw_HVgp_chr",chr,".txt")),
+                    .id="pool")
+  
+  # Filtering for mapping quality:
+  calls = filter(calls, MQ>30)
+  
+  # Filtering by depth:
+  calls = filter(calls, DP>=15, DP<90)  # about 10 % loss
+  
+  calls = calls[,c("pool", "POS", "REF", "ALT", "DP", "MAF")]
+  
+  calls = mutate(calls, w = POS %/% 2e6 * 2)  # in 2 Mbp windows
+  
+  # merge in the genetic coords
+  map_chr = map[map$chr==chr,]
+  # basic rescaling, to at least match the length of GP chroms:
+  range_old = range(map_chr$pos)
+  range_new = range(calls$POS)
+  map_chr$pos = (map_chr$pos-range_old[1]) / diff(range_old) * diff(range_new) + range_new[1]
+  calls$cM = approx(map_chr$pos, map_chr$gbs_cM, calls$POS, rule=2)$y
+  calls = mutate(calls, w_cM = cM %/% 1 * 1)  # in 1 cM windows
+  
+  calls_sum = calls %>%
+    group_by(w, pool) %>%
+    summarize(n=n(), mean11=mean(MAF>0.9), sum11=sum(MAF>0.9), medDP=median(DP),
+              chr=chr, meanMAF=mean(MAF))
+  calls_sum_cm = calls %>%
+    group_by(w_cM, pool) %>%
+    summarize(n=n(), mean11=mean(MAF>0.9), sum11=sum(MAF>0.9), medDP=median(DP),
+              chr=chr, meanMAF=mean(MAF))
+  
+  calls_sum$refgen = "cons"
+  calls_sum_cm$refgen = "cons"
+  cons_out = bind_rows(cons_out, calls_sum)
+  cons_out_cm = bind_rows(cons_out_cm, calls_sum_cm)
+}
+
+```
+
+```{r plotcons, echo=F, fig.width=9.5, fig.height=4.5}
+filter(calls_out, type=="all") %>%
+  mutate(refgen="GP") %>%
+  bind_rows(cons_out) %>%
+  ggplot(aes(x=w, y=meanMAF)) +
+  geom_line(aes(col=pool)) +
+  facet_grid(refgen~chr, scales="free_x") +
+  xlab("Mbp") + ylab("n calls") +
+  theme_bw() + theme(legend.position="bottom")
+
+filter(calls_out_cm, type=="all") %>%
+  mutate(refgen="GP") %>%
+  bind_rows(cons_out_cm) %>%
+  ggplot(aes(x=w_cM, y=meanMAF, col=pool)) +
+  geom_line(alpha=0.4) +
+  facet_grid(refgen~chr, scales="free_x") +
+  geom_smooth(se=F, method="loess", formula="y~x") + 
+  xlab("cM") + ylab("mean alt. AF") +
+  theme_bw() + theme(legend.position="bottom")
+filter(calls_out_cm, type=="all") %>%
+  mutate(refgen="GP") %>%
+  bind_rows(cons_out_cm) %>%
+  ggplot(aes(x=w_cM, y=mean11, col=pool)) +
+  geom_line(alpha=0.4) +
+  facet_grid(refgen~chr, scales="free_x") +
+  geom_smooth(se=F, method="loess", formula="y~x") + 
+  xlab("cM") + ylab("frac. alt. AF>0.9") +
+  theme_bw() + theme(legend.position="bottom")
+```
+
+# Zooming in on the likely peak
+```{r plotcons2, echo=F, fig.width=9.5, fig.height=5}
+tmp_chr5 = filter(calls_out, type=="all", pool=="tw") %>%
+  mutate(pool="tw_on_GP") %>%
+  bind_rows(cons_out) %>%
+  filter(chr==5)
+pal = c("#DB8169",  "#619CFF", "#A7DCF2")
+p1 = tmp_chr5 %>%
+  ggplot(aes(x=w, y=meanMAF)) +
+  geom_line(aes(col=pool)) +
+  scale_color_manual(values=pal) + 
+  xlab("Mbp") + ylab("mean alt. AF") +
+  theme_bw() + theme(legend.position="bottom")
+p2 = tmp_chr5 %>%
+  ggplot(aes(x=w, y=meanMAF)) +
+  geom_line(aes(col=pool)) +
+  scale_color_manual(values=pal) +
+  scale_x_continuous(n.breaks=10, expand=c(0,0)) +
+  coord_cartesian(xlim=c(455, 540)) + 
+  xlab(NULL) + ylab("mean alt. AF") +
+  theme_bw() + theme(legend.position="bottom")
+
+# high-impact, fixed in tw pool, not found in AII pool
+ann_chr5 = filter(ann_out, chr==5, conseq %in% c("mod", "high"), shared=="unique")
+p3 = ggplot(ann_chr5, aes(x=w, y=n, col=conseq)) +
+  geom_point() +
+  scale_color_manual(values=c("red", "orange")) +
+  coord_cartesian(xlim=c(455, 540)) + 
+  scale_x_continuous(n.breaks=10, expand=c(0,0)) +
+  xlab(NULL) + ylab("n calls") +
+  theme_bw() + theme(legend.position="bottom")
+
+plot_grid(p1, plot_grid(p2, p3, nrow=2), ncol=2, rel_widths = c(5, 3))
+```
+
+## Chr. 5 mutations in tw are concentrated in this region
+
+```{r ann_stats}
+ann_chr5 = filter(ann, CHR==5)
+frac.of.chr5 = 40e6/max(ann_chr5$POS)
+frac.of.chr5
+
+nchr5.twfixed = nrow(ann_chr5)
+nchr5.twfixed
+nrow(filter(ann_chr5, POS>490e6, POS<530e6)) / nchr5.twfixed
+
+nchr5.twfixed.hi = nrow(filter(ann_chr5, conseq=="high" | conseq=="mod"))
+nchr5.twfixed.hi
+nrow(filter(ann_chr5, POS>490e6, POS<530e6, conseq=="high" | conseq=="mod")) / nchr5.twfixed.hi
+
+contr_chr5 = fread("callsf_AII_HVgp_nodups_chr5.txt")
+contr_chr5 = mutate(contr_chr5, reliable=DP>5 & MQ>30 & MQ0F<0.2 & MAF>0.05)
+contr_chr5 = contr_chr5[,c("POS", "REF", "ALT", "reliable")]
+
+ann_chr5 = left_join(ann_chr5, contr_chr5, by=c("POS", "REF", "ALT"))
+nchr5.twfixed.uniq = nrow(filter(ann_chr5, is.na(reliable)))
+nchr5.twfixed.uniq
+nrow(filter(ann_chr5, is.na(reliable), POS>490e6, POS<530e6)) / nchr5.twfixed.uniq
+
+ann_chr5 = filter(ann_chr5, POS>490e6, POS<530e6)
+ann_chr5 = filter(ann_chr5, conseq!="low", is.na(reliable))
+table(ann_chr5$conseq)
+```
+## High-impact mutations in the region
+
+```{r hi_impact}
+ann_hi = separate_rows(ann_chr5, ANN, sep=",") %>%
+  filter(grepl("HIGH", ANN))
+nrow(ann_hi)
+
+# a few have very low DP4
+filter(ann_hi, DP4>10) %>% nrow
+
+# a few have some reference reads
+filter(ann_hi, DP4>10, MAF==1) %>% nrow
+
+ggplot(ann_hi, aes(x=POS/1e6, y=DP4, col=MAF==1)) +
+  geom_point() + theme_bw()
+ann_hi = separate(ann_hi, ANN,
+                  c("Allele", "Effect", "Impact", "GeneName", "GeneID", "FeatureType", "FeatureID", 
+                    "TranscrBiotype", "ExonRank", "HVGS.c", "HGVS.p", "pos.cDNA", "pos.CDS", "pos.PROT",
+                    "Distance", "Errors"), sep="\\|")
+ann_hi = select(ann_hi, -one_of(c("GeneID", "FeatureType", "FeatureID", "TranscrBiotype",
+                                  "Distance", "conseq", "reliable", "Allele", "Impact")))
+
+biomart = fread("../refs/biomart_go_annots.txt")
+ann_hi_go = select(biomart, -one_of(c("Transcript stable ID", "GO term definition"))) %>%
+  inner_join(ann_hi, ., by=c("GeneName"="Gene stable ID"))
+
+print.data.frame(ann_hi_go)
+```
+
