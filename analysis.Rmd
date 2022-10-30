@@ -451,7 +451,7 @@ filter(calls_out, type=="all") %>%
   ggplot(aes(x=w, y=meanMAF)) +
   geom_line(aes(col=pool)) +
   facet_grid(refgen~chr, scales="free_x") +
-  xlab("Mbp") + ylab("n calls") +
+  xlab("Mbp") + ylab("mean alt. AF") +
   theme_bw() + theme(legend.position="bottom")
 
 filter(calls_out_cm, type=="all") %>%
@@ -537,11 +537,19 @@ ann_chr5 = filter(ann_chr5, POS>490e6, POS<530e6)
 ann_chr5 = filter(ann_chr5, conseq!="low", is.na(reliable))
 table(ann_chr5$conseq)
 ```
+
 ## High-impact mutations in the region
 
 ```{r hi_impact}
-ann_hi = separate_rows(ann_chr5, ANN, sep=",") %>%
-  filter(grepl("HIGH", ANN))
+ann_chr5 = separate_rows(ann_chr5, ANN, sep=",") %>%
+            separate(ANN,
+                  c("Allele", "Effect", "Impact", "GeneName", "GeneID", "FeatureType", "FeatureID", 
+                    "TranscrBiotype", "ExonRank", "HVGS.c", "HGVS.p", "pos.cDNA", "pos.CDS", "pos.PROT",
+                    "Distance", "Errors"), sep="\\|")
+ann_chr5 = select(ann_chr5, -one_of(c("GeneID", "FeatureType", "FeatureID", "TranscrBiotype",
+                                  "Distance", "conseq", "reliable", "Allele")))
+
+ann_hi = ann_chr5 %>% filter(Impact=="HIGH")
 nrow(ann_hi)
 
 # a few have very low DP4
@@ -550,19 +558,52 @@ filter(ann_hi, DP4>10) %>% nrow
 # a few have some reference reads
 filter(ann_hi, DP4>10, MAF==1) %>% nrow
 
-ggplot(ann_hi, aes(x=POS/1e6, y=DP4, col=MAF==1)) +
-  geom_point() + theme_bw()
-ann_hi = separate(ann_hi, ANN,
-                  c("Allele", "Effect", "Impact", "GeneName", "GeneID", "FeatureType", "FeatureID", 
-                    "TranscrBiotype", "ExonRank", "HVGS.c", "HGVS.p", "pos.cDNA", "pos.CDS", "pos.PROT",
-                    "Distance", "Errors"), sep="\\|")
-ann_hi = select(ann_hi, -one_of(c("GeneID", "FeatureType", "FeatureID", "TranscrBiotype",
-                                  "Distance", "conseq", "reliable", "Allele", "Impact")))
-
+# attach GO terms and save
 biomart = fread("../refs/biomart_go_annots.txt")
-ann_hi_go = select(biomart, -one_of(c("Transcript stable ID", "GO term definition"))) %>%
+biomart = unite(biomart, "Pfam.pos", "Pfam start":"Pfam end", sep="-") %>%
+  unite("Pfam.domains", "Pfam ID":"Pfam.pos", sep=":")
+biomart = group_by(biomart, `Gene stable ID`) %>%
+  summarize(GO.term.name=paste(unique(`GO term name`), collapse="; "),
+            Pfam.domains=paste(unique(`Pfam.domains`), collapse="; "))
+
+ann_hi_go = biomart %>%
   inner_join(ann_hi, ., by=c("GeneName"="Gene stable ID"))
 
+ann_mod = filter(ann_chr5, Impact=="MODERATE")
+ann_mod_go = select(biomart, -one_of(c("Transcript stable ID", "GO term definition"))) %>%
+  inner_join(ann_mod, ., by=c("GeneName"="Gene stable ID"))
+
 print.data.frame(ann_hi_go)
+write.table(ann_hi_go, "~/Documents/mieziai/calls/final_tw_chr5_hi.csv", sep="\t", quote=F, row.names=F)
+write.table(ann_mod_go, "~/Documents/mieziai/calls/final_tw_chr5_mod.csv", sep="\t", quote=F, row.names=F)
+
+# prepare gene position lists
+gff = read.table("../refs/Hordeum_vulgare_goldenpromise.GPv1.54.gff3", h=F, sep="\t", quote="")
+gff = filter(gff, V3=="gene")
+gff$V9 = gsub(".*gene_id=(.*);.*", "\\1", gff$V9)
+all(ann_chr5$GeneName %in% gff$V9)
+gff_hi = filter(gff, V9 %in% ann_hi_go$GeneName)
+gff_mod = filter(gff, V9 %in% ann_mod_go$GeneName)
+# output positions for faidx
+writeLines(paste(gff_hi$V1, paste(gff_hi$V4, gff_hi$V5, sep="-"), sep=":"),
+           "genes/regions_hi.txt")
+writeLines(paste(gff_mod$V1, paste(gff_mod$V4, gff_mod$V5, sep="-"), sep=":"),
+           "genes/regions_mod.txt")
+
+# output +-1000bp, on the consensus seq
+gff_hi = mutate(gff_hi, V4=V4-1000, V5=V5+1000) %>%
+  unite("pos", V4:V5, sep="-") %>%
+  unite("region", c(V1, pos), sep=":") %>%
+  arrange(region) %>%
+  filter(!duplicated(region))
+gff_mod = mutate(gff_mod, V4=V4-1000, V5=V5+1000) %>%
+  unite("pos", V4:V5, sep="-") %>%
+  unite("region", c(V1, pos), sep=":") %>%
+  arrange(region) %>%
+  filter(!duplicated(region))
+
+writeLines(gff_hi$region,"genes/regions_buf1kb_hi.txt")
+writeLines(gff_mod$region, "genes/regions_buf1kb_mod.txt")
+
 ```
 
