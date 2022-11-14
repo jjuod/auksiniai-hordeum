@@ -79,7 +79,7 @@ cd ~/Documents/mieziai/old/called/
 # 8. GENERATING AII-11 CONSENSUS
 cd ~/Documents/mieziai/old/called/
 echo "generating consensus from old samples" 
-for CHR in 2 3 7
+for CHR in {1..7}
 do
 	# normalize vcf to clean up indels
 	/mnt/hdd/soft/bcftools-1.16/bcftools norm /mnt/quick/julius-temp/called_AII-11_chr${CHR}.vcf.gz \
@@ -109,7 +109,7 @@ done
 cd ~/Documents/mieziai/2022/mapped/
 echo "mapping the separate pools"
 
-for CHR in 1 2 3 7
+for CHR in {1..7}
 do
 	# extract (properly) mapped fastqs
 	samtools view -@4 -f PROPER_PAIR -b AII_HVgp_nodups.bam contig${CHR} \
@@ -145,7 +145,7 @@ done
 cd ~/Documents/mieziai/2022/called/
 echo "calling on consensus"
 
-for CHR in 1 2 3 7
+for CHR in {1..7}
 do
 	bcftools mpileup \
 	    -Ou -f ~/Documents/mieziai/old/called/consensus_AII-11_chr${CHR}.fa \

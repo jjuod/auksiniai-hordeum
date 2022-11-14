@@ -189,6 +189,19 @@ cd ~/Documents/mieziai/2022/depth/
 #zcat dp_AII_HVgp_nodups_chr4.txt.gz | awk '{a=a+$1} NR%1000==0{print int(NR/1000), a; a=0}' > dpkb_AII_HVgp_nodups_chr4.txt
 #zcat dp_tw_HVgp_nodups_chr4.txt.gz | awk '{a=a+$1} NR%1000==0{print int(NR/1000), a; a=0}' > dpkb_tw_HVgp_nodups_chr4.txt
 
+# Extract all AII pool snps for the target region, w/ annotations 
+# (to see if potential target genes have other large changes in AII)
+cd ~/Documents/mieziai/2022/targetregion/
+bcftools index ~/Documents/mieziai/2022/called/vcfs/HVgp/called22_AII_chr5.vcf.gz
+bcftools index ~/Documents/mieziai/2022/called/vcfs/HVgp/called22_tw_chr5.vcf.gz
+bcftools view -r contig5:490000000-530000000 \
+	~/Documents/mieziai/2022/called/vcfs/HVgp/called22_AII_chr5.vcf.gz \
+	-Oz -o called22_target_AII.vcf.gz
+java -jar /mnt/hdd/soft/snpEff/snpEff.jar Hordeum_vulgare_goldenpromise called22_target_AII.vcf.gz | gzip > annot_target_AII.vcf.gz
+# apply some filtering and reforamt
+bcftools query -f "%CHROM\t%POS\t%REF\t%ALT\t%DP\t%DP4\t%MQ0F\t%MQ\t%ANN\t[%GT]\n" annot_target_AII.vcf.gz | awk -v FS="\t" -v OFS="\t" 'BEGIN{print "CHR", "POS", "REF", "ALT", "DP", "DP4", "MAF", "MQ0F", "MQ", "ANN"} $5>10 && $8>20{split($6, d, ","); ref=d[1]+d[2]; alt=d[3]+d[4];
+print substr($1, 7,7), $2, $3, $4, $5, ref+alt, alt/(ref+alt), $7, $8, $9}' | grep -e HIGH -e MODERATE > annot_target_AII.txt
+
 # ALTERNATIVE REFERENCE
 #cd ~/Documents/mieziai/2022/mapped/
 #samtools stats -in /mnt/quick/julius-temp/Barke/twL4_barke.bam > map-stats-twL4-barke.txt
@@ -202,6 +215,20 @@ cd ~/Documents/mieziai/2022/depth/
 #bcftools query -f '%CHROM %POS %REF %ALT %DP %MQ %MQ0F %DP4 [%GT ]\n' \
 #	/mnt/quick/julius-temp/Barke/called22_barke_twL4.vcf.gz >> calls_twL4_barke.txt
 #awk 'NR==1{print $1,$2,$3,$4,$5,$6,$7,"DP4","MAF",$9; next} {split($8,d,","); rr=d[1]+d[2]; aa=d[3]+d[4]; print $1, $2, $3, $4, $5, $6, $7, rr+aa, aa/(rr+aa), $9}' calls_twL4_barke.txt > callsf_twL4_barke.txt
+#
+
+# Extract all SNPs from this locus for the M3 mapping:
+# (locus assumed to be 529-575Mbp)
+cd ~/Documents/mieziai/2022/targetregion/
+bcftools view -r 5H:529000000-575000000 \
+	~/Documents/mieziai/2022/called/vcfs/M3/called22_M3_tw_chr5.vcf.gz -Ou -n |\
+	bcftools view --min-af 1 \
+	-Oz -o called22_target_M3_tw.vcf.gz
+java -jar /mnt/hdd/soft/snpEff/snpEff.jar Hordeum_vulgare called22_target_M3_tw.vcf.gz | gzip > annot_target_M3_tw.vcf.gz
+# apply some filtering and reforamt
+bcftools query -f "%CHROM\t%POS\t%REF\t%ALT\t%DP\t%DP4\t%MQ0F\t%MQ\t%ANN\t[%GT]\n" annot_target_M3_tw.vcf.gz | awk -v FS="\t" -v OFS="\t" 'BEGIN{print "CHR", "POS", "REF", "ALT", "DP", "DP4", "MAF", "MQ0F", "MQ", "ANN"} $5>10 && $8>20 && $10=="1\/1"{split($6, d, ","); ref=d[1]+d[2]; alt=d[3]+d[4];
+print substr($1, 1,1), $2, $3, $4, $5, ref+alt, alt/(ref+alt), $7, $8, $9}' > annot_target_M3_tw_mono.txt
+
 
 # NOT DONE:
 #/usr/lib/jvm/java-1.8.0-openjdk-amd64/bin/java \

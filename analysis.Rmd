@@ -570,7 +570,7 @@ ann_hi_go = biomart %>%
   inner_join(ann_hi, ., by=c("GeneName"="Gene stable ID"))
 
 ann_mod = filter(ann_chr5, Impact=="MODERATE")
-ann_mod_go = select(biomart, -one_of(c("Transcript stable ID", "GO term definition"))) %>%
+ann_mod_go = biomart %>%
   inner_join(ann_mod, ., by=c("GeneName"="Gene stable ID"))
 
 print.data.frame(ann_hi_go)
