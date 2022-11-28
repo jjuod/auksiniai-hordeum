@@ -21,9 +21,20 @@ cd ~/Documents/mieziai/2022/genes/
 #samtools faidx geneseqs_buf1kb_mod.fa
 
 # Melatonin genes
+# (extract their variants from each individual)
 # NOTE: HORVU.MOREX.r3.6HG0554760 not found
-#grep -f genenames_melatonin.txt ../../refs/Hordeum_vulgare.MorexV3_pseudomolecules_assembly.54.gff3 | awk '$3=="gene"{split($9,a,";"); print $1":"$4"-"$5, a[1]}' 
-#samtools faidx -r <(awk '{print $1}' regions_melatonin.txt) ${REFM3} | awk '$0~/^>/{getline g < "regions_melatonin.txt"; print $0, g; next} {print}' > geneseqs_melatonin.txt
+cd ~/Documents/mieziai/2022/genes/
+grep -f genenames_melatonin.txt ../../refs/Hordeum_vulgare_goldenpromise.GPv1.54.gff3 | awk -v OFS="\t" '$3=="gene"{split($9,a,";"); print $1, $4-1000, $5+1000, a[1]}' > regions_melatonin.txt
 
-#blastn -query geneseqs_melatonin.txt -subject ${REFGP} -out blastres_regions_melatonin.txt -outfmt "6 qseqid qlen qstart qend sseqid sstart send evalue length pident"
+cd ~/Documents/mieziai/old/called/vcfs/
+bcftools concat called_AII-11_chr*.vcf.gz -n -o called_AII-11.vcf.gz
+bcftools concat called_tw-12_chr*.vcf.gz -n -o called_tw-12.vcf.gz
+bcftools index called_AII-11.vcf.gz
+bcftools index called_tw-12.vcf.gz
+bcftools merge called_AII-11.vcf.gz called_tw-12.vcf.gz -0 -Oz -o called_both1112.vcf.gz 
+bcftools index called_both1112.vcf.gz
+
+bcftools view -R ~/Documents/mieziai/2022/genes/regions_melatonin.txt called_both1112.vcf.gz -Ou |\
+	bcftools query -H -f '%CHROM %POS %REF %ALT %MQ0F %DP %DP4[ %GT]\n' > \
+	called_melatonin_GP_both1112.csv
 

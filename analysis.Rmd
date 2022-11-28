@@ -445,7 +445,7 @@ for(chr in 1:7){
 ```
 
 ```{r plotcons, echo=F, fig.width=9.5, fig.height=4.5}
-filter(calls_out, type=="all") %>%
+filter(cons_out, type=="all") %>%
   mutate(refgen="GP") %>%
   bind_rows(cons_out) %>%
   ggplot(aes(x=w, y=meanMAF)) +
@@ -607,3 +607,60 @@ writeLines(gff_mod$region, "genes/regions_buf1kb_mod.txt")
 
 ```
 
+## High-impact mutations in the region, individual-only comparison
+
+```{r hi_impact_indiv}
+ann_chr5_ind = fread("../annots/annot_tw-12_mono.txt")
+ann_chr5_ind = filter(ann_chr5_ind, MAF>0.9) %>%
+  mutate(conseq = ifelse(grepl("HIGH", ANN), "high",
+                         ifelse(grepl("MODERATE", ANN), "mod", "low"))) %>%
+  mutate(conseq = factor(conseq, levels=c("high", "mod", "low")))
+
+ann_chr5_ind = separate_rows(ann_chr5_ind, ANN, sep=",") %>%
+                separate(ANN,
+                  c("Allele", "Effect", "Impact", "GeneName", "GeneID", "FeatureType", "FeatureID", 
+                    "TranscrBiotype", "ExonRank", "HVGS.c", "HGVS.p", "pos.cDNA", "pos.CDS", "pos.PROT",
+                    "Distance", "Errors"), sep="\\|")
+ann_chr5_ind = select(ann_chr5_ind,
+                      -one_of(c("GeneID", "FeatureType", "FeatureID", "TranscrBiotype",
+                                  "Distance", "conseq", "Allele")))
+
+nrow(ann_chr5_ind) # 183 k
+
+# AII-11 control:
+contr_ind = fread("../old/newcalls/callsf_AII-11_HVgp_chr5.txt")
+contr_ind = filter(contr_ind, DP>=5, MQ>30, POS>490e6, POS<530e6)
+
+ann_chr5_ind = anti_join(ann_chr5_ind, contr_ind, by=c("POS", "REF", "ALT"))
+nrow(ann_chr5_ind) # 50 k
+
+# attach pool frequencies for a reality check...
+calls_AII = fread("callsf_AII_HVgp_nodups_chr5.txt")
+calls_tw = fread("callsf_tw_HVgp_nodups_chr5.txt")
+calls_AII = calls_AII[,c("POS", "REF", "ALT", "DP", "MAF")]
+calls_tw = calls_tw[,c("POS", "REF", "ALT", "DP", "MAF")]
+calls_pool = full_join(calls_AII, calls_tw, by=c("POS", "REF", "ALT"), suffix=c(".AII", ".tw"))
+rm(calls_AII); rm(calls_tw); gc()
+
+ann_chr5_ind = left_join(ann_chr5_ind, calls_pool, by=c("POS", "REF", "ALT"))
+
+# attach GO terms
+biomart = fread("../refs/biomart_go_annots.txt")
+biomart = unite(biomart, "Pfam.pos", "Pfam start":"Pfam end", sep="-") %>%
+  unite("Pfam.domains", "Pfam ID":"Pfam.pos", sep=":")
+biomart = group_by(biomart, `Gene stable ID`) %>%
+  summarize(GO.term.name=paste(unique(`GO term name`), collapse="; "),
+            Pfam.domains=paste(unique(`Pfam.domains`), collapse="; "))
+
+ann_chr5_ind = left_join(ann_chr5_ind, biomart, by=c("GeneName"="Gene stable ID"))
+
+ann_ind_hi = ann_chr5_ind %>% filter(Impact=="HIGH")
+ann_ind_mod = ann_chr5_ind %>% filter(Impact=="MODERATE")
+nrow(ann_ind_hi)  # 34
+nrow(ann_ind_mod)  # 321
+
+# save
+write.table(ann_ind_hi, "~/Documents/mieziai/old/newcalls/final_tw-12_chr5_hi.csv", sep="\t", quote=F, row.names=F)
+write.table(ann_ind_mod, "~/Documents/mieziai/old/newcalls/final_tw-12_chr5_mod.csv", sep="\t", quote=F, row.names=F)
+
+```

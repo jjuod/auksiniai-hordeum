@@ -189,6 +189,19 @@ cd ~/Documents/mieziai/2022/depth/
 #zcat dp_AII_HVgp_nodups_chr4.txt.gz | awk '{a=a+$1} NR%1000==0{print int(NR/1000), a; a=0}' > dpkb_AII_HVgp_nodups_chr4.txt
 #zcat dp_tw_HVgp_nodups_chr4.txt.gz | awk '{a=a+$1} NR%1000==0{print int(NR/1000), a; a=0}' > dpkb_tw_HVgp_nodups_chr4.txt
 
+
+# SnpEff annotate for individual comparisons:
+cd ~/Documents/mieziai/old/called/
+mkdir -p annots/
+bcftools index vcfs/called_tw-12_chr5.vcf.gz
+bcftools view  --min-af 1 -r contig5:490000000-530000000 \
+	vcfs/called_tw-12_chr5.vcf.gz -Oz -o annots/called_tw-12_mono.vcf.gz
+java -jar /mnt/hdd/soft/snpEff/snpEff.jar Hordeum_vulgare_goldenpromise annots/called22_tw-12_mono.vcf.gz | gzip > annots/annot_tw-12_mono.vcf.gz
+# apply some filtering and reformat
+bcftools query -f "%CHROM\t%POS\t%REF\t%ALT\t%DP\t%DP4\t%MQ0F\t%MQ\t%ANN\t[%GT]\n" annots/annot_tw-12_mono.vcf.gz | awk -v FS="\t" -v OFS="\t" 'BEGIN{print "CHR", "POS", "REF", "ALT", "DP", "DP4", "MAF", "MQ0F", "MQ", "ANN"} $5>10 && $8>20 && $10=="1/1"{split($6, d, ","); ref=d[1]+d[2]; alt=d[3]+d[4];
+print substr($1, 7,7), $2, $3, $4, $5, ref+alt, alt/(ref+alt), $7, $8, $9}' > annots/annot_tw-12_mono.txt
+
+
 # Extract all AII pool snps for the target region, w/ annotations 
 # (to see if potential target genes have other large changes in AII)
 cd ~/Documents/mieziai/2022/targetregion/

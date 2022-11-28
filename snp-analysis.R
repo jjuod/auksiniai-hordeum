@@ -1064,3 +1064,184 @@ aiiindiv$ID = paste(aiiindiv$POS, aiiindiv$REF, aiiindiv$ALT, sep="_")
 table(aii$ID %in% aiiindiv$ID)
 table(aiiindiv$ID %in% aii$ID[aii$GT=="1/1"])
 table(aii$ID[aii$GT=="1/1"] %in% aiiindiv$ID[aiiindiv$GT=="1/1"])
+
+
+### ---------------
+# Consensus re-mapping on M3:
+cons_out = tibble()
+cons_out_cm = tibble()
+for(chr in 1:7){
+  calls = bind_rows("AII"=fread(paste0("callsconsf_AII_M3_chr",chr,".txt")),
+                    "tw"=fread(paste0("callsconsf_tw_M3_chr",chr,".txt")),
+                    .id="pool")
+  
+  # Filtering for mapping quality:
+  calls = filter(calls, MQ>30)
+  
+  # Filtering by depth:
+  calls = filter(calls, DP>=15, DP<90)  # about 10 % loss
+  
+  calls = calls[,c("pool", "POS", "REF", "ALT", "DP", "MAF")]
+  
+  calls = mutate(calls, w = POS %/% 2e6 * 2)  # in 2 Mbp windows
+  
+  # merge in the genetic coords
+  map_chr = map[map$chr==chr,]
+  # basic rescaling, to at least match the length of GP chroms:
+  range_old = range(map_chr$pos)
+  range_new = range(calls$POS)
+  map_chr$pos = (map_chr$pos-range_old[1]) / diff(range_old) * diff(range_new) + range_new[1]
+  calls$cM = approx(map_chr$pos, map_chr$gbs_cM, calls$POS, rule=2)$y
+  calls = mutate(calls, w_cM = cM %/% 1 * 1)  # in 1 cM windows
+  
+  calls_sum = calls %>%
+    group_by(w, pool) %>%
+    summarize(n=n(), mean11=mean(MAF>0.9), sum11=sum(MAF>0.9), medDP=median(DP),
+              chr=chr, meanMAF=mean(MAF))
+  calls_sum_cm = calls %>%
+    group_by(w_cM, pool) %>%
+    summarize(n=n(), mean11=mean(MAF>0.9), sum11=sum(MAF>0.9), medDP=median(DP),
+              chr=chr, meanMAF=mean(MAF))
+  
+  calls_sum$refgen = "cons"
+  calls_sum_cm$refgen = "cons"
+  cons_out = bind_rows(cons_out, calls_sum)
+  cons_out_cm = bind_rows(cons_out_cm, calls_sum_cm)
+}
+
+
+cons_out %>%
+  ggplot(aes(x=w, y=meanMAF)) +
+  geom_line(aes(col=pool)) +
+  facet_wrap(~chr, scales="free_x", nrow=2) +
+  xlab("Mbp") + ylab("mean alt. AF") +
+  theme_bw() + theme(legend.position="bottom")
+
+cons_out_cm %>%
+  ggplot(aes(x=w_cM, y=meanMAF, col=pool)) +
+  geom_line(alpha=0.4) +
+  facet_wrap(~chr, scales="free_x", nrow=2) +
+  geom_smooth(se=F, method="loess", formula="y~x") + 
+  xlab("cM") + ylab("mean alt. AF") +
+  theme_bw() + theme(legend.position="bottom")
+cons_out_cm %>%
+  ggplot(aes(x=w_cM, y=mean11, col=pool)) +
+  geom_line(alpha=0.4) +
+  facet_wrap(~chr, scales="free_x", nrow=2) +
+  geom_smooth(se=F, method="loess", formula="y~x") + 
+  xlab("cM") + ylab("frac. alt. AF>0.9") +
+  theme_bw() + theme(legend.position="bottom")
+
+# check duplicate removal effects
+# (keeping in mind that dups were removed for HV already, from which
+# reads were extracted for this)
+chr5_nodups = fread("callsconsf_tw_M3nodups_chr5.txt")
+chr5_nodups = filter(chr5_nodups, MQ>30, DP>=15, DP<90)
+chr5_nodups = mutate(chr5_nodups, w=POS %/% 2e6 *2) %>%
+  group_by(w) %>%
+  summarize(meanMAF=mean(MAF), n=n())
+bind_rows("removed"=chr5_nodups,
+          "kept"=filter(cons_out, chr==5, pool=="tw"),
+          .id="dups") %>%
+  ggplot(aes(x=w, y=meanMAF)) +
+  geom_line(aes(col=dups)) +
+  xlab("Mbp") + ylab("mean alt. AF") +
+  theme_bw() + theme(legend.position="bottom")
+
+
+rawcalls = fread("callsconsf_tw_M3_chr5.txt")
+
+### ---------------
+# manually flipping alleles to recreate consensus-ref mapping:
+calls_out = tibble()
+calls_out_cm = tibble()
+for(chr in 1:7){
+  print(chr)
+  calls = bind_rows("AII"=fread(paste0("callsconsf_AII_HVgp_chr",chr,".txt")),
+                    "tw"=fread(paste0("callsconsf_tw_HVgp_chr",chr,".txt")),
+                    .id="pool")
+  calls$type = "all"
+  
+  # Filtering for mapping quality:
+  calls = filter(calls, MQ>30)
+  
+  # Filtering by depth:
+  calls = filter(calls, DP>=15, DP<90)  # about 10 % loss
+  
+  calls = calls[,c("pool", "type", "POS", "REF", "ALT", "DP", "MAF", "GT")]
+  
+  # Filtering only those present in both samples:
+  callsBOTH = right_join(filter(calls, pool=="AII"),
+                         filter(calls, pool=="tw"),
+                         by=c("POS", "REF", "ALT"),
+                         suffix=c(".AII", ".tw")) %>%
+    select(-one_of(c("pool.AII", "pool.tw")))
+  
+  # Drop heterozygotes
+  callsBOTH = filter(callsBOTH, is.na(GT.AII) | GT.AII!="0/1")
+  # flip alt homozygotes:
+  toflip = which(callsBOTH$GT.AII=="1/1")
+  callsBOTH$MAF.tw[toflip] = 1 - callsBOTH$MAF.tw[toflip]
+  stored_alt = callsBOTH$ALT[toflip]
+  callsBOTH$ALT[toflip] = callsBOTH$REF[toflip]
+  callsBOTH$REF[toflip] = stored_alt
+  
+  # Filtering to remove roughly monomorphic markers:
+  # callsBOTH = filter(callsBOTH, MAF.AII<0.8 | MAF.tw<0.8)
+  
+  callsBOTH = select(callsBOTH, -one_of(c("type.AII", "type.tw", "GT.AII", "GT.tw")))
+  callsBOTH = pivot_longer(callsBOTH, c(DP.AII, DP.tw, MAF.AII, MAF.tw),
+                           names_to=c("stat", "pool"), names_sep="\\.", values_to="val") %>%
+    spread("stat", "val")
+  
+  callsBOTH$type="shared"
+  calls = bind_rows(calls, callsBOTH)
+  
+  calls = mutate(calls, w = POS %/% 2e6 * 2)  # in 2 Mbp windows
+  
+  # merge in the genetic coords
+  map_chr = map[map$chr==chr,]
+  # basic rescaling, to at least match the length of GP chroms:
+  range_old = range(map_chr$pos)
+  range_new = range(calls$POS)
+  map_chr$pos = (map_chr$pos-range_old[1]) / diff(range_old) * diff(range_new) + range_new[1]
+  calls$cM = approx(map_chr$pos, map_chr$gbs_cM, calls$POS, rule=2)$y
+  calls = mutate(calls, w_cM = cM %/% 1 * 1)  # in 1 cM windows
+  
+  calls_sum = calls %>%
+    group_by(w, pool, type) %>%
+    summarize(n=n(), mean11=mean(MAF>0.9), sum11=sum(MAF>0.9), medDP=median(DP),
+              chr=chr, meanMAF=mean(MAF))
+  calls_sum_cm = calls %>%
+    group_by(w_cM, pool, type) %>%
+    summarize(n=n(), mean11=mean(MAF>0.9), sum11=sum(MAF>0.9), medDP=median(DP),
+              chr=chr, meanMAF=mean(MAF))
+  
+  calls_out = bind_rows(calls_out, calls_sum)
+  calls_out_cm = bind_rows(calls_out_cm, calls_sum_cm)
+}
+
+# not really much better as the long haploblocks are still a problem
+ggplot(calls_out, aes(x=w, y=meanMAF)) +
+  geom_line(aes(col=pool)) +
+  facet_grid(type~chr, scales="free_x") +
+  theme_bw() + theme(legend.position="bottom")
+ggplot(calls_out_cm, aes(x=w_cM, y=meanMAF)) +
+  geom_line(aes(col=pool)) +
+  facet_grid(type~chr, scales="free_x") +
+  theme_bw() + theme(legend.position="bottom")
+
+filter(calls_out, chr==5, type=="shared") %>%
+  mutate(type="shared.GP") %>%
+  bind_rows(calls_sum) %>%
+  filter(n>500) %>%
+  ggplot(aes(x=w, y=meanMAF)) +
+  geom_point(aes(col=pool)) +
+  facet_grid(type~., scales="free_x") +
+  coord_cartesian(xlim=c(500, 515)) +
+  theme_bw() + theme(legend.position="bottom")
+
+## Filtering pool candidate hits by individual runs
+ff = read.table("finalwblast_tw_chr5_hi.csv", h=T, sep="\t")
+contr = fread("../old/newcalls/callsf_AII-11_HVgp_chr5.txt")
+left_join(ff, contr, by=c("POS")) %>% View
