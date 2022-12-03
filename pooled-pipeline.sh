@@ -66,21 +66,23 @@ set -e
 #mv Hordeum_vulgare.MorexV3_pseudomolecules_assembly.dna_sm.toplevel.fa.gz Hordeum_vulgare.MorexV3.dna_sm.fa.gz
 #gunzip Hordeum_vulgare.MorexV3.dna_sm.fa.gz
 #bwa index -a bwtsw Hordeum_vulgare.MorexV3.dna_sm.fa
+GPREF=/mnt/quick/julius-temp/Hordeum_vulgare_goldenpromise.GPv1.dna.toplevel.fa 
+M3REF=/mnt/quick/julius-temp/Hordeum_vulgare.MorexV3.dna_sm.fa 
 
 # 5. map onto ref genome
 #cd ~/Documents/mieziai/2022/mapped/
-#bwa mem -t 9 /mnt/quick/julius-temp/Hordeum_vulgare_goldenpromise.GPv1.dna.toplevel.fa \
+#bwa mem -t 9 ${GPREF} \
 #	../trim/AII_frw.fq.gz ../trim/AII_rev.fq.gz 2> bwa_log.txt | samtools sort -@2 -o AII_HVgp.bam
-#bwa mem -t 9 /mnt/quick/julius-temp/Hordeum_vulgare_goldenpromise.GPv1.dna.toplevel.fa \
+#bwa mem -t 9 ${GPREF} \
 #	../trim/tw_frw.fq.gz ../trim/tw_rev.fq.gz 2> bwa_log_tw.txt | samtools sort -@2 -o tw_HVgp.bam
 #samtools stats -in AII_HVgp.bam > map_stats_AII_HVgp.txt
 #samtools stats -in tw_HVgp.bam > map_stats_tw_HVgp.txt
 #plot-bamstats map_stats_AII_HVgp.txt -p plots/p_AII
 #plot-bamstats map_stats_tw_HVgp.txt -p plots/p_tw
 
-#bwa mem -t 9 /mnt/quick/julius-temp/Hordeum_vulgare.MorexV3.dna_sm.fa \
+#bwa mem -t 9 ${M3REF} \
 #	../trim/AII_frw.fq.gz ../trim/AII_rev.fq.gz 2> bwa_log.txt | samtools fixmate -m -@2 - AII_M3.bam
-#bwa mem -t 9 /mnt/quick/julius-temp/Hordeum_vulgare.MorexV3.dna_sm.fa \
+#bwa mem -t 9 ${M3REF} \
 #	../trim/tw_frw.fq.gz ../trim/tw_rev.fq.gz 2> bwa_log_tw.txt | samtools fixmate -m -@2 - tw_M3.bam
 #samtools stats -in AII_M3.bam > map-stats-AII-M3.txt
 #samtools stats -in tw_M3.bam > map-stats-tw-M3.txt
@@ -110,27 +112,27 @@ set -e
 #seq 1 7 | parallel -j 7 'samtools mpileup \
 #    -r contig{} -u -f /mnt/quick/julius-temp/Hordeum_vulgare_goldenpromise.GPv1.dna.toplevel.fa \
 #    AII_HVgp_nodups.bam tw_HVgp_nodups.bam |\
-#    bcftools call -m -v -Oz -o /mnt/quick/julius-temp/called22_chr{}.vcf.gz'
+#    bcftools call -m -v -Oz -o ../called/vcfs/HVgp_joint/called22_chr{}.vcf.gz'
 
 # call separately then
 #seq 1 7 | parallel -j 7 'samtools mpileup \
 #    -r contig{} -u -f /mnt/quick/julius-temp/Hordeum_vulgare_goldenpromise.GPv1.dna.toplevel.fa \
 #    AII_HVgp_nodups.bam |\
-#    bcftools call -m -v -Oz -o /mnt/quick/julius-temp/called22_AII_chr{}.vcf.gz'
+#    bcftools call -m -v -Oz -o ../called/vcfs/HVgp/called22_AII_chr{}.vcf.gz'
 #
 #seq 1 7 | parallel -j 7 'samtools mpileup \
 #    -r contig{} -u -f /mnt/quick/julius-temp/Hordeum_vulgare_goldenpromise.GPv1.dna.toplevel.fa \
 #    tw_HVgp_nodups.bam |\
-#    bcftools call -m -v -Oz -o /mnt/quick/julius-temp/called22_tw_chr{}.vcf.gz'
+#    bcftools call -m -v -Oz -o ../called/vcfs/HVgp/called22_tw_chr{}.vcf.gz'
 #
 #seq 1 7 | parallel -j 7 'samtools mpileup \
 #    -r {}H -u -f /mnt/quick/julius-temp/Hordeum_vulgare.MorexV3.dna_sm.fa \
 #    AII_M3.bam |\
-#    bcftools call -m -v -Oz -o /mnt/quick/julius-temp/called22_M3_AII_chr{}.vcf.gz'
+#    bcftools call -m -v -Oz -o ../called/vcfs/M3/called22_M3_AII_chr{}.vcf.gz'
 #seq 1 7 | parallel -j 7 'samtools mpileup \
 #    -r {}H -u -f /mnt/quick/julius-temp/Hordeum_vulgare.MorexV3.dna_sm.fa \
 #    tw_M3.bam |\
-#    bcftools call -m -v -Oz -o /mnt/quick/julius-temp/called22_M3_tw_chr{}.vcf.gz'
+#    bcftools call -m -v -Oz -o ../called/vcfs/M3/called22_M3_tw_chr{}.vcf.gz'
 
 ## convert calls to text format
 cd ~/Documents/mieziai/2022/called/
@@ -138,41 +140,63 @@ cd ~/Documents/mieziai/2022/called/
 #do
 #	echo 'POS REF ALT DP MQ MQ0F DP4 GT' > calls_AII_HVgp_nodups_chr${i}.txt
 #	bcftools query -f '%POS %REF %ALT %DP %MQ %MQ0F %DP4 [%GT ]\n' \
-#		/mnt/quick/julius-temp/called22_AII_chr${i}.vcf.gz >> calls_AII_HVgp_nodups_chr${i}.txt
+#		vcfs/HVgp/called22_AII_chr${i}.vcf.gz >> calls_AII_HVgp_nodups_chr${i}.txt
 #	echo 'POS REF ALT DP MQ MQ0F DP4 GT' > calls_tw_HVgp_nodups_chr${i}.txt
 #	bcftools query -f '%POS %REF %ALT %DP %MQ %MQ0F %DP4 [%GT ]\n' \
-#		/mnt/quick/julius-temp/called22_tw_chr${i}.vcf.gz >> calls_tw_HVgp_nodups_chr${i}.txt
+#		vcfs/HVgp/called22_tw_chr${i}.vcf.gz >> calls_tw_HVgp_nodups_chr${i}.txt
 #	echo 'POS REF ALT DP MQ MQ0F DP4 GT' > calls_AII_M3_chr${i}.txt
 #	bcftools query -f '%POS %REF %ALT %DP %MQ %MQ0F %DP4 [%GT ]\n' \
-#		/mnt/quick/julius-temp/called22_M3_AII_chr${i}.vcf.gz >> calls_AII_M3_chr${i}.txt
+#		vcfs/M3/called22_M3_AII_chr${i}.vcf.gz >> M3/calls_AII_M3_chr${i}.txt
 #	echo 'POS REF ALT DP MQ MQ0F DP4 GT' > calls_tw_M3_chr${i}.txt
 #	bcftools query -f '%POS %REF %ALT %DP %MQ %MQ0F %DP4 [%GT ]\n' \
-#		/mnt/quick/julius-temp/called22_M3_tw_chr${i}.vcf.gz >> calls_tw_M3_chr${i}.txt
-#done
-
-#for CHR in {1..7}
-#do
-#	awk 'NR==1{print $1,$2,$3,$4,$5,$6,"DP4","MAF",$8; next} {split($7,d,","); rr=d[1]+d[2]; aa=d[3]+d[4]; print $1, $2, $3, $4, $5, $6, rr+aa, aa/(rr+aa), $8}' calls_AII_HVgp_nodups_chr${CHR}.txt > callsf_AII_HVgp_nodups_chr${CHR}.txt
-#	awk 'NR==1{print $1,$2,$3,$4,$5,$6,"DP4","MAF",$8; next} {split($7,d,","); rr=d[1]+d[2]; aa=d[3]+d[4]; print $1, $2, $3, $4, $5, $6, rr+aa, aa/(rr+aa), $8}' calls_tw_HVgp_nodups_chr${CHR}.txt > callsf_tw_HVgp_nodups_chr${CHR}.txt
+#		vcfs/M3/called22_M3_tw_chr${i}.vcf.gz >> M3/calls_tw_M3_chr${i}.txt
+#
+#	awk 'NR==1{print $1,$2,$3,$4,$5,$6,"DP4","MAF",$8; next} {split($7,d,","); rr=d[1]+d[2]; aa=d[3]+d[4]; print $1, $2, $3, $4, $5, $6, rr+aa, aa/(rr+aa), $8}' calls_AII_HVgp_nodups_chr${i}.txt > callsf_AII_HVgp_nodups_chr${i}.txt
+#	awk 'NR==1{print $1,$2,$3,$4,$5,$6,"DP4","MAF",$8; next} {split($7,d,","); rr=d[1]+d[2]; aa=d[3]+d[4]; print $1, $2, $3, $4, $5, $6, rr+aa, aa/(rr+aa), $8}' calls_tw_HVgp_nodups_chr${i}.txt > callsf_tw_HVgp_nodups_chr${i}.txt
 #done
 
 # 8. ANNOTATE VIA SNPEFF
 
 cd ~/Documents/mieziai/2022/called/
-#bcftools concat /mnt/quick/julius-temp/called22_tw_chr1.vcf.gz \
-#	/mnt/quick/julius-temp/called22_tw_chr2.vcf.gz \
-#	/mnt/quick/julius-temp/called22_tw_chr3.vcf.gz \
-#	/mnt/quick/julius-temp/called22_tw_chr4.vcf.gz \
-#	/mnt/quick/julius-temp/called22_tw_chr5.vcf.gz \
-#	/mnt/quick/julius-temp/called22_tw_chr6.vcf.gz \
-#	/mnt/quick/julius-temp/called22_tw_chr7.vcf.gz \
+#bcftools concat vcfs/HVgp/called22_tw_chr1.vcf.gz \
+#	vcfs/HVgp/called22_tw_chr2.vcf.gz \
+#	vcfs/HVgp/called22_tw_chr3.vcf.gz \
+#	vcfs/HVgp/called22_tw_chr4.vcf.gz \
+#	vcfs/HVgp/called22_tw_chr5.vcf.gz \
+#	vcfs/HVgp/called22_tw_chr6.vcf.gz \
+#	vcfs/HVgp/called22_tw_chr7.vcf.gz \
 #	-Ou -n | bcftools view  --min-af 1 \
-#	-Oz -o called22_tw_mono.vcf.gz
-#java -jar /mnt/hdd/soft/snpEff/snpEff.jar Hordeum_vulgare_goldenpromise called22_tw_mono.vcf.gz | gzip > annot_tw_mono.vcf.gz
-# apply some filtering and reforamt
-#bcftools query -f "%CHROM\t%POS\t%REF\t%ALT\t%DP\t%DP4\t%MQ0F\t%MQ\t%ANN\t[%GT]\n" annot_tw_mono.vcf.gz | awk -v FS="\t" 'BEGIN{print "CHR", "POS", "REF", "ALT", "DP", "DP4", "MAF", "MQ0F", "MQ", "ANN"} $5>10 && $8>20 && $10=="1\/1"{split($6, d, ","); ref=d[1]+d[2]; alt=d[3]+d[4];
-#print substr($1, 7,7), $2, $3, $4, $5, ref+alt, alt/(ref+alt), $7, $8, $9}' > annot_tw_mono.txt
+#	-Oz -o annots/called22_tw_mono.vcf.gz
+#java -jar /mnt/hdd/soft/snpEff/snpEff.jar Hordeum_vulgare_goldenpromise annots/called22_tw_mono.vcf.gz | gzip > annots/annot_tw_mono.vcf.gz
+## apply some filtering and reformat
+#bcftools query -f "%CHROM\t%POS\t%REF\t%ALT\t%DP\t%DP4\t%MQ0F\t%MQ\t%ANN\t[%GT]\n" annots/annot_tw_mono.vcf.gz | awk -v FS="\t" 'BEGIN{print "CHR", "POS", "REF", "ALT", "DP", "DP4", "MAF", "MQ0F", "MQ", "ANN"} $5>10 && $8>20 && $10=="1\/1"{split($6, d, ","); ref=d[1]+d[2]; alt=d[3]+d[4];
+#print substr($1, 7,7), $2, $3, $4, $5, ref+alt, alt/(ref+alt), $7, $8, $9}' > annots/annot_tw_mono.txt
 
+#java -jar /mnt/hdd/soft/snpEff/snpEff.jar Hordeum_vulgare vcfs/M3/called22_M3_tw_chr5.vcf.gz | gzip > annots/annot_tw_M3_chr5.vcf.gz
+## apply some filtering and reformat
+#bcftools query -f "%CHROM\t%POS\t%REF\t%ALT\t%DP\t%DP4\t%MQ0F\t%MQ\t%ANN\t[%GT]\n" annots/annot_tw_M3_chr5.vcf.gz | awk -v FS="\t" 'BEGIN{print "CHR", "POS", "REF", "ALT", "DP", "DP4", "MAF", "MQ0F", "MQ", "ANN"} $5>10 && $8>20 && $10=="1\/1"{split($6, d, ","); ref=d[1]+d[2]; alt=d[3]+d[4];
+##print substr($1, 7,7), $2, $3, $4, $5, ref+alt, alt/(ref+alt), $7, $8, $9}' > annots/annot_tw_M3_chr5.txt
+
+# Control variants from AII pool, chr5 region:
+bcftools index vcfs/HVgp/called22_AII_chr5.vcf.gz
+bcftools view -r contig5:490000000-530000000 \
+	vcfs/HVgp/called22_AII_chr5.vcf.gz \
+	-Oz -o annots/called22_AII_chr5.vcf.gz
+java -jar /mnt/hdd/soft/snpEff/snpEff.jar Hordeum_vulgare_goldenpromise \
+	annots/called22_AII_chr5.vcf.gz | gzip > annots/annot_AII_chr5.vcf.gz
+# apply some filtering and reformat
+bcftools query -f "%CHROM\t%POS\t%REF\t%ALT\t%DP\t%DP4\t%MQ0F\t%MQ\t%ANN\t[%GT]\n" annots/annot_AII_chr5.vcf.gz | awk -v FS="\t" 'BEGIN{print "CHR", "POS", "REF", "ALT", "DP", "DP4", "MAF", "MQ0F", "MQ", "ANN"} $5>10 && $8>20{split($6, d, ","); ref=d[1]+d[2]; alt=d[3]+d[4];
+print substr($1, 7,7), $2, $3, $4, $5, ref+alt, alt/(ref+alt), $7, $8, $9}' > annots/annot_AII_chr5.txt
+
+bcftools index vcfs/M3/called22_M3_AII_chr5.vcf.gz
+bcftools view  -r 5H:530000000-580000000 \
+	vcfs/M3/called22_M3_AII_chr5.vcf.gz \
+	-Oz -o annots/called22_M3_AII_chr5.vcf.gz
+java -jar /mnt/hdd/soft/snpEff/snpEff.jar Hordeum_vulgare \
+	annots/called22_M3_AII_chr5.vcf.gz | gzip > annots/annot_AII_M3_chr5.vcf.gz
+# apply some filtering and reformat
+bcftools query -f "%CHROM\t%POS\t%REF\t%ALT\t%DP\t%DP4\t%MQ0F\t%MQ\t%ANN\t[%GT]\n" annots/annot_AII_M3_chr5.vcf.gz | awk -v FS="\t" 'BEGIN{print "CHR", "POS", "REF", "ALT", "DP", "DP4", "MAF", "MQ0F", "MQ", "ANN"} $5>10 && $8>20{split($6, d, ","); ref=d[1]+d[2]; alt=d[3]+d[4];
+print substr($1, 1,1), $2, $3, $4, $5, ref+alt, alt/(ref+alt), $7, $8, $9}' > annots/annot_AII_M3_chr5.txt
 
 
 # TESTING:
