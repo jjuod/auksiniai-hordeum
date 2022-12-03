@@ -607,6 +607,38 @@ writeLines(gff_mod$region, "genes/regions_buf1kb_mod.txt")
 
 ```
 
+
+## "Control" high-impact mutations in the region from the AII pool vs. reference
+
+```{r hi_impact_aii}
+contr_chr5 = fread("../annots/annot_AII_chr5.txt")
+
+nrow(contr_chr5) # 447 k
+
+contr_chr5 = separate_rows(contr_chr5, ANN, sep=",") %>%
+            separate(ANN,
+                  c("Allele", "Effect", "Impact", "GeneName", "GeneID", "FeatureType", "FeatureID", 
+                    "TranscrBiotype", "ExonRank", "HVGS.c", "HGVS.p", "pos.cDNA", "pos.CDS", "pos.PROT",
+                    "Distance", "Errors"), sep="\\|")
+contr_chr5 = select(contr_chr5, -one_of(c("GeneID", "FeatureType", "FeatureID", "TranscrBiotype",
+                                  "Distance", "Allele")))
+table(contr_chr5$Impact)
+
+contr_chr5 = filter(contr_chr5, Impact=="MODERATE" | Impact=="HIGH")
+
+contr_hi = filter(contr_chr5, Impact=="HIGH")
+contr_hi_go = biomart %>%
+  inner_join(contr_hi, ., by=c("GeneName"="Gene stable ID"))
+
+contr_mod = filter(contr_chr5, Impact=="MODERATE")
+contr_mod_go = biomart %>%
+  inner_join(ann_mod, ., by=c("GeneName"="Gene stable ID"))
+
+write.table(contr_hi_go, "~/Documents/mieziai/calls/final_AII_chr5_hi.csv", sep="\t", quote=F, row.names=F)
+write.table(contr_mod_go, "~/Documents/mieziai/calls/final_AII_chr5_mod.csv", sep="\t", quote=F, row.names=F)
+```
+
+
 ## High-impact mutations in the region, individual-only comparison
 
 ```{r hi_impact_indiv}

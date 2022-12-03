@@ -599,7 +599,7 @@ ggplot(calls_out_cm, aes(x=w_cM, y=meanMAF)) +
   facet_wrap(~chr, scales="free_x", nrow=2) +
   theme_bw() + theme(legend.position="bottom")
 
-chr=5
+chr=4
 cold = bind_rows("AII"=fread(paste0("../old/newcalls/callsf_AII-11_HVgp_chr",chr,".txt")),
                  "tw"=fread(paste0("../old/newcalls/callsf_tw-12_HVgp_chr",chr,".txt")),
                  .id="pool")
