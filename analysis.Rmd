@@ -445,7 +445,7 @@ for(chr in 1:7){
 ```
 
 ```{r plotcons, echo=F, fig.width=9.5, fig.height=4.5}
-filter(cons_out, type=="all") %>%
+filter(calls_out, type=="all") %>%
   mutate(refgen="GP") %>%
   bind_rows(cons_out) %>%
   ggplot(aes(x=w, y=meanMAF)) +
@@ -632,7 +632,7 @@ contr_hi_go = biomart %>%
 
 contr_mod = filter(contr_chr5, Impact=="MODERATE")
 contr_mod_go = biomart %>%
-  inner_join(ann_mod, ., by=c("GeneName"="Gene stable ID"))
+  inner_join(contr_mod, ., by=c("GeneName"="Gene stable ID"))
 
 write.table(contr_hi_go, "~/Documents/mieziai/calls/final_AII_chr5_hi.csv", sep="\t", quote=F, row.names=F)
 write.table(contr_mod_go, "~/Documents/mieziai/calls/final_AII_chr5_mod.csv", sep="\t", quote=F, row.names=F)

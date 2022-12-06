@@ -350,7 +350,7 @@ contr_hi_go = biomart %>%
 
 contr_mod = filter(contr_chr5, Impact=="MODERATE")
 contr_mod_go = biomart %>%
-  inner_join(ann_mod, ., by=c("GeneName"="Gene stable ID"))
+  inner_join(contr_mod, ., by=c("GeneName"="Gene stable ID"))
 
 write.table(contr_hi_go, "~/Documents/mieziai/calls/final_AII_M3_chr5_hi.csv", sep="\t", quote=F, row.names=F)
 write.table(contr_mod_go, "~/Documents/mieziai/calls/final_AII_M3_chr5_mod.csv", sep="\t", quote=F, row.names=F)
