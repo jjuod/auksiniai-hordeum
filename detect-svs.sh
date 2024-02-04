@@ -8,22 +8,22 @@ M3REF=/mnt/quick/julius-temp/Hordeum_vulgare.MorexV3.dna_sm.fa
 # NOTE: not done, the duplicate number was small on these.
 
 # DYSGU SV calling:
-#cd ~/Documents/mieziai/2024/svs/
-#dysgu run ${M3REF} -p14 ../tmp/ \
-#	~/Documents/mieziai/old/mapped_M3/AII-11_M3.bam \
-#	-x > M3/dysgu_AII-11.vcf
-#dysgu run ${M3REF} -p14 ../tmp/ \
-#	~/Documents/mieziai/old/mapped_M3/tw-12_M3.bam \
-#	-x > M3/dysgu_tw-12.vcf
-## compare w/ wildtype and then filter on quality
-## (also tried the other way around, got similar amounts of svs)
-#dysgu filter --normal-vcf M3/dysgu_AII-11.vcf \
-#	M3/dysgu_tw-12.vcf \
-#	~/Documents/mieziai/old/mapped_M3/AII-11_M3.bam > M3/dysgu_tw-12_unique.vcf
-#dysgu filter --min-prob 0.2 --support-fraction 0.15 \
-#	--pass-prob 0.3 \
-#	M3/dysgu_tw-12_unique.vcf > M3/dysgu_tw-12_unique_filteredafter.vcf
-#
+cd ~/Documents/mieziai/2024/svs/
+dysgu run ${M3REF} -p14 ../tmp/ \
+	~/Documents/mieziai/old/mapped_M3/AII-11_M3.bam \
+	-x > M3/dysgu_AII-11.vcf
+dysgu run ${M3REF} -p14 ../tmp/ \
+	~/Documents/mieziai/old/mapped_M3/tw-12_M3.bam \
+	-x > M3/dysgu_tw-12.vcf
+# compare w/ wildtype and then filter on quality
+# (also tried the other way around, got similar amounts of svs)
+dysgu filter --normal-vcf M3/dysgu_AII-11.vcf \
+	M3/dysgu_tw-12.vcf \
+	~/Documents/mieziai/old/mapped_M3/AII-11_M3.bam > M3/dysgu_tw-12_unique.vcf
+dysgu filter --min-prob 0.2 --support-fraction 0.15 \
+	--pass-prob 0.3 \
+	M3/dysgu_tw-12_unique.vcf > M3/dysgu_tw-12_unique_filteredafter.vcf
+
 
 # DYSGU on pools:
 cd ~/Documents/mieziai/2024/svs/

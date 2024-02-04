@@ -2,15 +2,15 @@ library(tidyr)
 library(dplyr)
 library(ggplot2)
 
-
 setwd("~/Documents/mieziai/2024/svs/")
 
 
+# control variants, if needed:
+# svs_aii = read.csv("dysgu_AII-11_filtered.vcf", sep="\t", comment.char = "#", h=F)
 
-svs_aii = read.csv("dysgu_AII-11_filtered.vcf", sep="\t", comment.char = "#", h=F)
-
+# vcfs already contain only variants unique to the tw-12 individual
+# and passing some quality filters
 svs_aii = read.csv("dysgu_tw-12_unique_filteredafter.vcf", sep="\t", comment.char = "#", h=F)
-
 
 colnames(svs_aii) = c("CHR", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT", "GT")
 nrow(svs_aii)
@@ -34,11 +34,18 @@ svs_aii$END = ifelse(svs_aii$SVTYPE=="TRA", svs_aii$CHR2_POS, svs_aii$END)
 
 table(svs_aii$CHR)
 
+# ------------------
+# --- PLOTTING -----
+
 library(circlize)
+
+# keep only larger and homozygous SVs
 df = filter(svs_aii, SVLEN>1000, substr(GT, 1,3)=="1/1") %>%
     mutate(POS = POS/ 1e6, END = END/1e6)
+
 dels = filter(df, SVTYPE=="DEL")
 ins = filter(df, SVTYPE=="DUP")
+
 circos.initialize(sectors=df$CHR, x=df$POS)
 circos.track(df$CHR, ylim=c(0,1),
              panel.fun = function(x, y) {
